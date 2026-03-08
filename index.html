@@ -354,13 +354,24 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
         <span class="unit">mm</span>
       </div>
     </div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:10px">
-      <input type="checkbox" id="shellOutward" style="accent-color:var(--accent);width:14px;height:14px">
-      中心から外向きの面のみ処理
-    </label>
+    <div class="inp-group">
+      <label>面フィルタ</label>
+      <select id="shellFilter" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <option value="none">なし — 全面処理</option>
+        <option value="outward">外向き面のみ（法線判定・高速）</option>
+        <option value="raycast">中心可視面のみ（レイキャスト・低速）</option>
+      </select>
+    </div>
+    <div class="inp-group">
+      <label>法線スムージング回数</label>
+      <div class="inp-row">
+        <input type="number" id="shellSmooth" placeholder="0" step="5" min="0" max="200" value="0">
+        <span class="unit">回</span>
+      </div>
+    </div>
     <p style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
-      内側方向に指定厚みのシェルを生成します。<br>
-      開口部（底面など）は元の形状を保ちます。
+      内側方向に指定厚みのシェルを生成します。開口部（底面など）は元の形状を保ちます。<br>
+      スムージング &gt; 0 にすると抽象化メッシュの法線でオフセットし、毛羽立ちを軽減します。
     </p>
     <button class="apply-btn" id="shellBtn" disabled>▶ 肉厚を適用</button>
     <button class="reset-btn" id="shellResetBtn" style="display:none;margin-top:6px">シェルをリセット</button>
@@ -1073,55 +1084,68 @@ document.getElementById('boxCheck').addEventListener('change', e => {
 });
 
 // ── Shell Thickness ────────────────────────────────────────────
-function computeShellGeo(srcGeo, thickness, outwardOnly = false) {
+function yld(msg) { setMsg(msg); return new Promise(r => setTimeout(r, 0)); }
+
+function weldGeo(srcGeo) {
   const posAttr = srcGeo.attributes.position;
   const count = posAttr.count;
-
-  // 1. Weld vertices by position (0.001 mm grid)
-  const uniqueVerts = [];
-  const vertIndex   = [];
-  const keyMap      = new Map();
+  const uniqueVerts = [], vertIndex = [], keyMap = new Map();
   for (let i = 0; i < count; i++) {
     const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
     const key = `${Math.round(x*1000)},${Math.round(y*1000)},${Math.round(z*1000)}`;
     if (!keyMap.has(key)) { keyMap.set(key, uniqueVerts.length); uniqueVerts.push(new THREE.Vector3(x,y,z)); }
     vertIndex.push(keyMap.get(key));
   }
-
   const nTri = count / 3;
-  let faces  = [];
+  const faces = [];
   for (let i = 0; i < nTri; i++) faces.push([vertIndex[i*3], vertIndex[i*3+1], vertIndex[i*3+2]]);
+  return { uniqueVerts, faces };
+}
 
-  // 1b. Optional: keep only faces whose normal points away from model centroid
-  if (outwardOnly) {
-    const centroid = new THREE.Vector3();
-    uniqueVerts.forEach(v => centroid.add(v));
-    centroid.divideScalar(uniqueVerts.length);
-    const _fe1 = new THREE.Vector3(), _fe2 = new THREE.Vector3();
-    faces = faces.filter(([a,b,c]) => {
-      const fc = new THREE.Vector3().add(uniqueVerts[a]).add(uniqueVerts[b]).add(uniqueVerts[c]).divideScalar(3);
-      _fe1.subVectors(uniqueVerts[b], uniqueVerts[a]);
-      _fe2.subVectors(uniqueVerts[c], uniqueVerts[a]);
-      const n = new THREE.Vector3().crossVectors(_fe1, _fe2);
-      return n.dot(fc.sub(centroid)) > 0; // outward-facing
-    });
+// ラプラシアンスムージング: 頂点座標を隣接頂点の平均に置き換えて抽象化メッシュを生成
+function laplacianSmooth(uniqueVerts, faces, iterations) {
+  if (iterations <= 0) return uniqueVerts;
+  const n = uniqueVerts.length;
+  const adjSets = Array.from({length: n}, () => new Set());
+  for (const [a,b,c] of faces) {
+    adjSets[a].add(b); adjSets[a].add(c);
+    adjSets[b].add(a); adjSets[b].add(c);
+    adjSets[c].add(a); adjSets[c].add(b);
   }
+  const adj = adjSets.map(s => [...s]);
+  let pos = uniqueVerts.map(v => v.clone());
+  for (let iter = 0; iter < iterations; iter++) {
+    const next = pos.map((p, i) => {
+      const nbrs = adj[i];
+      if (nbrs.length === 0) return p.clone();
+      const avg = new THREE.Vector3();
+      for (const j of nbrs) avg.add(pos[j]);
+      return avg.divideScalar(nbrs.length);
+    });
+    pos = next;
+  }
+  return pos;
+}
 
-  // 2. Area-weighted vertex normals
-  const vertNormals = uniqueVerts.map(() => new THREE.Vector3());
+// normVerts: 法線計算に使う頂点座標（省略時は uniqueVerts をそのまま使用）
+function buildShellGeo(uniqueVerts, faces, thickness, normVerts) {
+  // normVerts が指定されている場合はその抽象化メッシュの法線でオフセット方向を決定
+  const nv = normVerts || uniqueVerts;
+
+  // Area-weighted vertex normals (抽象化メッシュ基準)
+  const vertNormals = nv.map(() => new THREE.Vector3());
   const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _cr = new THREE.Vector3();
   for (const [a,b,c] of faces) {
-    _e1.subVectors(uniqueVerts[b], uniqueVerts[a]);
-    _e2.subVectors(uniqueVerts[c], uniqueVerts[a]);
-    _cr.crossVectors(_e1, _e2); // magnitude = 2*area, direction = face normal
+    _e1.subVectors(nv[b], nv[a]);
+    _e2.subVectors(nv[c], nv[a]);
+    _cr.crossVectors(_e1, _e2);
     vertNormals[a].add(_cr); vertNormals[b].add(_cr); vertNormals[c].add(_cr);
   }
   vertNormals.forEach(n => n.normalize());
 
-  // 3. Inner vertices (offset inward = -normal * thickness)
+  // 内側頂点は元の座標位置から抽象化法線方向にオフセット
   const innerVerts = uniqueVerts.map((v,i) => v.clone().addScaledVector(vertNormals[i], -thickness));
 
-  // 4. Boundary edges: directed edge [a,b] is boundary if [b,a] does not exist
   const dirEdge = new Map();
   for (const [a,b,c] of faces) {
     for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
@@ -1132,7 +1156,6 @@ function computeShellGeo(srcGeo, thickness, outwardOnly = false) {
     if (!dirEdge.has(`${b}_${a}`)) boundaryEdges.push([a,b]);
   }
 
-  // 5. Assemble output geometry
   const positions = [], normals = [];
   function addTri(p0, p1, p2) {
     const e1 = new THREE.Vector3().subVectors(p1,p0);
@@ -1140,15 +1163,11 @@ function computeShellGeo(srcGeo, thickness, outwardOnly = false) {
     const n  = new THREE.Vector3().crossVectors(e1,e2).normalize();
     for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
   }
-  // Outer surface (original winding)
   for (const [a,b,c] of faces) addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c]);
-  // Inner surface (flipped winding = normals pointing inward)
   for (const [a,b,c] of faces) addTri(innerVerts[a], innerVerts[c], innerVerts[b]);
-  // Wall strips along boundary edges
   for (const [a,b] of boundaryEdges) {
-    const oA=uniqueVerts[a], oB=uniqueVerts[b], iA=innerVerts[a], iB=innerVerts[b];
-    addTri(oA, oB, iB);
-    addTri(oA, iB, iA);
+    addTri(uniqueVerts[a], uniqueVerts[b], innerVerts[b]);
+    addTri(uniqueVerts[a], innerVerts[b],  innerVerts[a]);
   }
 
   const g = new THREE.BufferGeometry();
@@ -1158,35 +1177,104 @@ function computeShellGeo(srcGeo, thickness, outwardOnly = false) {
   return g;
 }
 
-function applyShell() {
+async function applyShell() {
   const src = scaledGeo || currentGeo;
   if (!src) return;
   const thk = parseFloat(document.getElementById('shellThk').value);
   if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
-  const outwardOnly = document.getElementById('shellOutward').checked;
-  setMsg('肉厚を計算中...');
-  setTimeout(() => {
-    try {
-      shellGeo = computeShellGeo(src, thk, outwardOnly);
-    } catch(err) {
-      setMsg('エラー: ' + err.message); return;
-    }
-    if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
-    const th = getTheme() ? THEME.light : THEME.dark;
-    const mat = new THREE.MeshPhongMaterial({
-      color: th.scaled.color, specular: th.scaled.specular, shininess: th.scaled.shininess,
-      transparent: true, opacity: 0.92, side: THREE.DoubleSide
+  const filterMode = document.getElementById('shellFilter').value;
+  const smoothIter = Math.max(0, parseInt(document.getElementById('shellSmooth').value) || 0);
+
+  document.getElementById('shellBtn').disabled = true;
+  await yld('頂点を統合中...');
+
+  const { uniqueVerts, faces: allFaces } = weldGeo(src);
+  const total = allFaces.length;
+  let faces = allFaces;
+
+  // ── Face filter ──────────────────────────────────────────────
+  if (filterMode === 'outward') {
+    const centroid = new THREE.Vector3();
+    uniqueVerts.forEach(v => centroid.add(v));
+    centroid.divideScalar(uniqueVerts.length);
+    const fe1 = new THREE.Vector3(), fe2 = new THREE.Vector3();
+    faces = allFaces.filter(([a,b,c]) => {
+      const fc = new THREE.Vector3().add(uniqueVerts[a]).add(uniqueVerts[b]).add(uniqueVerts[c]).divideScalar(3);
+      fe1.subVectors(uniqueVerts[b], uniqueVerts[a]);
+      fe2.subVectors(uniqueVerts[c], uniqueVerts[a]);
+      return new THREE.Vector3().crossVectors(fe1,fe2).dot(new THREE.Vector3().subVectors(fc, centroid)) > 0;
     });
-    shellMesh = new THREE.Mesh(shellGeo, mat);
-    scene.add(shellMesh);
-    // 元メッシュは非表示
-    if (mainMesh)   mainMesh.visible  = false;
-    if (scaledMesh) scaledMesh.visible = false;
-    document.getElementById('dlBtn').disabled = false;
-    document.getElementById('shellResetBtn').style.display = 'block';
-    const tc = shellGeo.attributes.position.count / 3;
-    setMsg(`✓ 肉厚適用完了 — ${tc.toLocaleString()} 三角形`);
-  }, 0);
+    await yld(`外向きフィルタ完了: ${total.toLocaleString()} → ${faces.length.toLocaleString()} 面`);
+
+  } else if (filterMode === 'raycast') {
+    const centroid = new THREE.Vector3();
+    uniqueVerts.forEach(v => centroid.add(v));
+    centroid.divideScalar(uniqueVerts.length);
+
+    // Build temp mesh once
+    const tmpPos = new Float32Array(total * 9);
+    let ti = 0;
+    for (const [a,b,c] of allFaces)
+      for (const idx of [a,b,c]) { tmpPos[ti++]=uniqueVerts[idx].x; tmpPos[ti++]=uniqueVerts[idx].y; tmpPos[ti++]=uniqueVerts[idx].z; }
+    const tmpGeo = new THREE.BufferGeometry();
+    tmpGeo.setAttribute('position', new THREE.BufferAttribute(tmpPos, 3));
+    const tmpMesh = new THREE.Mesh(tmpGeo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+    tmpMesh.updateMatrixWorld();
+
+    const ray = new THREE.Raycaster(); ray.near = 0;
+    const CHUNK = 200;
+    faces = [];
+    for (let i = 0; i < total; i += CHUNK) {
+      const end = Math.min(i + CHUNK, total);
+      for (let fi = i; fi < end; fi++) {
+        const [a,b,c] = allFaces[fi];
+        const fc = new THREE.Vector3().add(uniqueVerts[a]).add(uniqueVerts[b]).add(uniqueVerts[c]).divideScalar(3);
+        const toC = new THREE.Vector3().subVectors(centroid, fc);
+        const dist = toC.length();
+        if (dist < 0.001) { faces.push(allFaces[fi]); continue; }
+        const dir = toC.divideScalar(dist);
+        ray.set(fc.clone().addScaledVector(dir, 0.01), dir);
+        ray.far = dist - 0.01;
+        if (ray.intersectObject(tmpMesh, false).length === 0) faces.push(allFaces[fi]);
+      }
+      const pct = Math.round(end / total * 100);
+      await yld(`レイキャスト中... ${end.toLocaleString()} / ${total.toLocaleString()} 面 (${pct}%)`);
+    }
+    tmpGeo.dispose();
+    await yld(`レイキャスト完了: ${total.toLocaleString()} → ${faces.length.toLocaleString()} 面`);
+  }
+
+  // ── Laplacian smoothing (optional) ───────────────────────────
+  let normVerts = null;
+  if (smoothIter > 0) {
+    await yld(`ラプラシアンスムージング中 (${smoothIter}回)...`);
+    normVerts = laplacianSmooth(uniqueVerts, allFaces, smoothIter);
+  }
+
+  // ── Build shell ──────────────────────────────────────────────
+  await yld('シェルを構築中...');
+  try {
+    shellGeo = buildShellGeo(uniqueVerts, faces, thk, normVerts);
+  } catch(err) {
+    setMsg('エラー: ' + err.message);
+    document.getElementById('shellBtn').disabled = false;
+    return;
+  }
+
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+  const th = getTheme() ? THEME.light : THEME.dark;
+  shellMesh = new THREE.Mesh(shellGeo, new THREE.MeshPhongMaterial({
+    color: th.scaled.color, specular: th.scaled.specular, shininess: th.scaled.shininess,
+    transparent: true, opacity: 0.92, side: THREE.DoubleSide
+  }));
+  scene.add(shellMesh);
+  if (mainMesh)   mainMesh.visible  = false;
+  if (scaledMesh) scaledMesh.visible = false;
+  document.getElementById('dlBtn').disabled = false;
+  document.getElementById('shellResetBtn').style.display = 'block';
+  document.getElementById('shellBtn').disabled = false;
+  const tc = shellGeo.attributes.position.count / 3;
+  setMsg(`✓ 肉厚適用完了 — ${tc.toLocaleString()} 三角形`);
 }
 
 function resetShell() {
