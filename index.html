@@ -599,11 +599,15 @@ function startPick(which) {
 function confirmWheelAdj() {
   // Y軸ロックが有効な場合、後輪のYを前輪に合わせる
   applyLockY();
+  pickMode=null;
   activeAdj=null;
   setOrtho(false);
+  const vp=document.getElementById('viewport');
+  vp.style.cursor='grab';
   const btn=document.getElementById('camToggle');
   btn.textContent='PERSP'; btn.style.borderColor='var(--border)'; btn.style.color='var(--text)';
   document.getElementById('keyHint').style.display='none';
+  document.getElementById('wheelActions').style.display='none';
   document.getElementById('btnFront').classList.remove('active');
   document.getElementById('btnRear').classList.remove('active');
   setMsg('04: 目標寸法を入力して「スケール適用」を押してください');
