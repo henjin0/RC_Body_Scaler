@@ -1,0 +1,1068 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RC Body Scaler</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Share+Tech+Mono&family=Barlow+Condensed:wght@300;400;600;700&display=swap');
+:root {
+  --bg:#0a0c0f; --panel:#111418; --border:#1e2530;
+  --accent:#00e5ff; --accent2:#ff6b35; --text:#c8d4e0; --dim:#4a5568;
+  --success:#39d353; --warning:#f6c90e;
+  --ax:#ff4455; --ay:#44ff88; --az:#4488ff;
+  --scene-bg:#070a0d;
+}
+:root.light {
+  --bg:#f0ede8; --panel:#e4e0d8; --border:#c8c2b8;
+  --accent:#0077aa; --accent2:#cc5500; --text:#2a2520; --dim:#7a7268;
+  --success:#2d7a3a; --warning:#996600;
+  --ax:#cc2233; --ay:#2a7a44; --az:#1a5599;
+  --scene-bg:#dedad4;
+}
+*, *::before, *::after { transition: background-color .25s, border-color .25s, color .25s; }
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  background:var(--bg);color:var(--text);
+  font-family:'Barlow Condensed',sans-serif;
+  height:100vh;display:grid;
+  grid-template-rows:48px 1fr;
+  grid-template-columns:1fr 300px;
+  overflow:hidden;
+}
+header{
+  grid-column:1/-1;background:var(--panel);
+  border-bottom:1px solid var(--border);
+  display:flex;align-items:center;padding:0 20px;gap:16px;
+}
+header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--accent);letter-spacing:3px}
+.badge{font-size:10px;letter-spacing:2px;color:var(--dim);border:1px solid var(--border);padding:2px 8px}
+#viewport{position:relative;background:#070a0d;overflow:hidden;cursor:grab}
+#viewport canvas{display:block;width:100%!important;height:100%!important}
+.overlay{position:absolute;top:14px;left:14px;font-family:'Share Tech Mono',monospace;
+  font-size:12px;color:var(--accent);background:rgba(0,0,0,.75);
+  border:1px solid var(--accent);padding:7px 14px;pointer-events:none;letter-spacing:1px;max-width:60%}
+
+#sidebar{background:var(--panel);border-left:1px solid var(--border);
+  display:flex;flex-direction:column;overflow-y:auto}
+.section{border-bottom:1px solid var(--border);padding:14px 16px}
+.sec-title{font-size:10px;letter-spacing:3px;text-transform:uppercase;
+  color:var(--dim);margin-bottom:12px;font-family:'Share Tech Mono',monospace}
+
+.upload-zone{border:1px dashed var(--border);padding:18px;text-align:center;
+  cursor:pointer;transition:.2s;background:rgba(0,229,255,.02)}
+.upload-zone:hover,.upload-zone.drag{border-color:var(--accent);background:rgba(0,229,255,.05)}
+.upload-zone input{display:none}
+.upload-zone .ico{font-size:26px;display:block;margin-bottom:6px}
+.upload-zone p{font-size:12px;color:var(--dim);line-height:1.5}
+.info-row{display:flex;justify-content:space-between;font-size:12px;margin-bottom:5px}
+.info-row .lbl{color:var(--dim)}
+.info-row .val{font-family:'Share Tech Mono',monospace;font-size:11px}
+
+.orient-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:8px}
+.rot-btn{
+  padding:8px 4px;border:1px solid var(--border);background:transparent;
+  color:var(--text);font-family:'Barlow Condensed',sans-serif;font-size:12px;
+  letter-spacing:1px;cursor:pointer;transition:.2s;text-align:center;line-height:1.4
+}
+.rot-btn:hover:not(:disabled){border-color:var(--accent);color:var(--accent);background:rgba(0,229,255,.05)}
+.rot-btn:disabled{color:var(--dim);cursor:not-allowed}
+.ax{color:var(--ax)} .ay{color:var(--ay)} .az{color:var(--az)}
+.orient-desc{font-size:11px;color:var(--dim);line-height:1.7;
+  font-family:'Share Tech Mono',monospace;background:rgba(255,255,255,.02);
+  border:1px solid var(--border);padding:8px 10px;margin-top:4px}
+
+.step-btn{
+  width:100%;padding:9px 12px;border:1px solid var(--border);background:transparent;
+  color:var(--dim);font-family:'Barlow Condensed',sans-serif;font-size:13px;
+  letter-spacing:2px;text-transform:uppercase;cursor:pointer;transition:.2s;
+  text-align:left;display:flex;align-items:center;gap:10px;margin-bottom:7px
+}
+.step-btn.active{border-color:var(--accent);color:var(--accent);background:rgba(0,229,255,.05)}
+.step-btn.done{border-color:var(--success);color:var(--success);background:rgba(57,211,83,.04)}
+.step-btn:disabled{color:var(--dim);cursor:not-allowed;pointer-events:none}
+.step-btn .num{width:20px;height:20px;border-radius:50%;border:1px solid currentColor;
+  display:flex;align-items:center;justify-content:center;font-size:10px;
+  flex-shrink:0;font-family:'Share Tech Mono',monospace}
+
+.wheel-info{font-family:'Share Tech Mono',monospace;font-size:11px;margin-top:8px;line-height:1.9}
+.wf{color:var(--accent)} .wr{color:var(--accent2)} .wwb{color:var(--warning)}
+.key-hint{background:rgba(0,229,255,.04);border:1px solid rgba(0,229,255,.2);
+  padding:8px 10px;font-size:11px;color:var(--dim);font-family:'Share Tech Mono',monospace;
+  line-height:1.8;margin-top:8px;display:none}
+.key-hint kbd{background:var(--border);color:var(--text);padding:1px 4px;font-size:10px}
+
+.inp-group{margin-bottom:11px}
+.inp-group label{display:block;font-size:11px;color:var(--dim);
+  letter-spacing:1px;margin-bottom:4px;text-transform:uppercase}
+.inp-row{display:flex;gap:6px;align-items:center}
+.inp-row input{flex:1;background:var(--bg);border:1px solid var(--border);
+  color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;
+  font-size:13px;outline:none;transition:.2s}
+.inp-row input:focus{border-color:var(--accent)}
+.inp-row .unit{font-size:11px;color:var(--dim);width:24px;text-align:right}
+.cur{font-family:'Share Tech Mono',monospace;font-size:11px;color:var(--accent2);margin-top:3px}
+
+.preview{background:var(--bg);border:1px solid var(--border);padding:10px;margin-top:10px;display:none}
+.ax-bar{margin-bottom:8px}
+.ax-bar .bl{display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px}
+.ax-bar .an{font-family:'Share Tech Mono',monospace;font-size:12px}
+.an.x{color:var(--ax)} .an.y{color:var(--ay)} .an.z{color:var(--az)}
+.bar-track{height:4px;background:var(--border)}
+.bar-fill{height:100%;transition:width .3s}
+.bar-fill.x{background:var(--ax)} .bar-fill.y{background:var(--ay)} .bar-fill.z{background:var(--az)}
+
+.apply-btn{width:100%;padding:11px;background:transparent;border:1px solid var(--accent);
+  color:var(--accent);font-family:'Barlow Condensed',sans-serif;font-size:14px;
+  letter-spacing:3px;text-transform:uppercase;cursor:pointer;transition:.2s;margin-top:4px}
+.apply-btn:hover:not(:disabled){background:rgba(0,229,255,.1)}
+.apply-btn:disabled{border-color:var(--border);color:var(--dim);cursor:not-allowed}
+.dl-btn{width:100%;padding:12px;background:var(--accent);border:none;color:#000;
+  font-family:'Barlow Condensed',sans-serif;font-size:14px;font-weight:700;
+  letter-spacing:3px;text-transform:uppercase;cursor:pointer;transition:.2s;margin-top:8px}
+.dl-btn:hover:not(:disabled){background:#00bcd4}
+.dl-btn:disabled{background:var(--border);color:var(--dim);cursor:not-allowed}
+.reset-btn{width:100%;padding:8px;background:transparent;border:1px solid var(--border);
+  color:var(--dim);font-family:'Barlow Condensed',sans-serif;font-size:12px;
+  letter-spacing:2px;text-transform:uppercase;cursor:pointer;margin-top:6px;transition:.2s}
+.reset-btn:hover{border-color:var(--accent2);color:var(--accent2)}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--border)}
+</style>
+</head>
+<body>
+<header>
+  <h1>RC Body Scaler</h1>
+  <div class="badge">STL Orientation + Wheelbase Fit</div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:12px">
+    <div style="display:flex;align-items:center;gap:6px">
+      <span style="font-size:10px;letter-spacing:2px;color:var(--dim);text-transform:uppercase">View</span>
+      <button id="camToggle" onclick="toggleCamMode()"
+        style="font-family:'Share Tech Mono',monospace;font-size:11px;letter-spacing:1px;
+               border:1px solid var(--border);background:transparent;color:var(--text);
+               padding:4px 12px;cursor:pointer;transition:.2s">
+        PERSP
+      </button>
+    </div>
+    <button id="themeToggle" onclick="toggleTheme()"
+      title="ダーク/ライト切替"
+      style="font-family:'Share Tech Mono',monospace;font-size:13px;
+             border:1px solid var(--border);background:transparent;color:var(--dim);
+             padding:4px 10px;cursor:pointer;transition:.2s;line-height:1">
+      ☀
+    </button>
+  </div>
+</header>
+
+<div id="viewport">
+  <canvas id="canvas"></canvas>
+  <div class="overlay" id="stepHint">STLファイルをアップロードしてください</div>
+
+</div>
+
+<div id="sidebar">
+
+  <div class="section">
+    <div class="sec-title">01 / Load STL</div>
+    <div class="upload-zone" id="uploadZone">
+      <input type="file" id="fileInput" accept=".stl">
+      <span class="ico">⬡</span>
+      <p>STLをドロップ<br>またはクリックして選択</p>
+    </div>
+    <div id="fileInfo" style="display:none;margin-top:10px">
+      <div class="info-row"><span class="lbl">File</span><span class="val" id="fileName" style="max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"></span></div>
+      <div class="info-row"><span class="lbl">Triangles</span><span class="val" id="triCount">-</span></div>
+      <div class="info-row"><span class="lbl">X (進行)</span><span class="val" id="sizeX">-</span></div>
+      <div class="info-row"><span class="lbl">Y (車高)</span><span class="val" id="sizeY">-</span></div>
+      <div class="info-row"><span class="lbl">Z (車幅)</span><span class="val" id="sizeZ">-</span></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">02 / Orientation</div>
+    <div class="orient-grid">
+      <button class="rot-btn" disabled id="rx+"><span class="ax">X</span><br>+90°</button>
+      <button class="rot-btn" disabled id="ry+"><span class="ay">Y</span><br>+90°</button>
+      <button class="rot-btn" disabled id="rz+"><span class="az">Z</span><br>+90°</button>
+      <button class="rot-btn" disabled id="rx-"><span class="ax">X</span><br>-90°</button>
+      <button class="rot-btn" disabled id="ry-"><span class="ay">Y</span><br>-90°</button>
+      <button class="rot-btn" disabled id="rz-"><span class="az">Z</span><br>-90°</button>
+    </div>
+    <div class="orient-desc">
+      目標: 進行方向 = <span class="ax">+X</span> &nbsp;
+             車高 = <span class="ay">+Y</span> &nbsp;
+             車幅 = <span class="az">Z</span><br>
+      右下の軸矢印を見ながら回転を合わせてください
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">03 / Wheel Points</div>
+    <button class="step-btn" id="btnFront" disabled>
+      <span class="num">F</span> 前輪軸をクリック指定
+    </button>
+    <button class="step-btn" id="btnRear" disabled>
+      <span class="num">R</span> 後輪軸をクリック指定
+    </button>
+    <div class="wheel-info" id="wheelInfo"></div>
+    <div class="inp-group" style="margin-top:10px">
+      <label>タイヤ半径（可視化用）</label>
+      <div class="inp-row">
+        <input type="number" id="tireR" placeholder="例: 30" step="0.5" value="30">
+        <span class="unit">mm</span>
+      </div>
+    </div>
+    <div class="key-hint" id="keyHint">
+      <kbd>←</kbd><kbd>→</kbd> X軸移動 &nbsp; <kbd>↑</kbd><kbd>↓</kbd> Y軸移動<br>
+      <kbd>Shift</kbd>+矢印 = 0.1mm単位<br>
+      <kbd>Tab</kbd> 前後輪切替 &nbsp; <kbd>Enter</kbd> 確定
+    </div>
+    <div id="wheelActions" style="display:none;margin-top:10px">
+      <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:8px">
+        <input type="checkbox" id="lockY" style="accent-color:var(--accent);width:14px;height:14px">
+        前後輪のY軸を同じ高さに固定
+      </label>
+      <button id="confirmWheels" class="apply-btn" style="margin-top:0">✓ 軸位置を確定</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">04 / Target Dimensions</div>
+    <div class="inp-group">
+      <label>ホイールベース (X軸)</label>
+      <div class="inp-row">
+        <input type="number" id="tWB" placeholder="例: 257" step="0.1">
+        <span class="unit">mm</span>
+      </div>
+      <div class="cur" id="curWB"></div>
+    </div>
+    <div class="inp-group">
+      <label>車高 (Y軸)</label>
+      <div class="inp-row">
+        <input type="number" id="tH" placeholder="例: 80" step="0.1">
+        <span class="unit">mm</span>
+      </div>
+      <div class="cur" id="curH"></div>
+    </div>
+    <div class="inp-group">
+      <label>トレッド幅 (Z軸・車幅)</label>
+      <div class="inp-row">
+        <input type="number" id="tTW" placeholder="例: 190" step="0.1">
+        <span class="unit">mm</span>
+      </div>
+      <div class="cur" id="curTW"></div>
+    </div>
+    <div class="preview" id="scalePreview">
+      <div class="ax-bar">
+        <div class="bl"><span class="an x">X (WB)</span><span id="sxLbl" style="font-family:'Share Tech Mono',monospace;font-size:11px">1.000×</span></div>
+        <div class="bar-track"><div class="bar-fill x" id="barX" style="width:50%"></div></div>
+      </div>
+      <div class="ax-bar">
+        <div class="bl"><span class="an y">Y (Height)</span><span id="syLbl" style="font-family:'Share Tech Mono',monospace;font-size:11px">1.000×</span></div>
+        <div class="bar-track"><div class="bar-fill y" id="barY" style="width:50%"></div></div>
+      </div>
+      <div class="ax-bar">
+        <div class="bl"><span class="an z">Z (Tread)</span><span id="szLbl" style="font-family:'Share Tech Mono',monospace;font-size:11px">1.000×</span></div>
+        <div class="bar-track"><div class="bar-fill z" id="barZ" style="width:50%"></div></div>
+      </div>
+    </div>
+    <button class="apply-btn" id="applyBtn" disabled>▶ スケール適用</button>
+    <button class="reset-btn" id="resetBtn">リセット</button>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">05 / Export</div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:10px">
+      <input type="checkbox" id="ghostCheck" checked style="accent-color:var(--accent);width:14px;height:14px">
+      元モデルをゴースト表示
+    </label>
+    <button class="dl-btn" id="dlBtn" disabled>⬇ STLをダウンロード</button>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">06 / Interior Box</div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:12px">
+      <input type="checkbox" id="boxCheck" style="accent-color:var(--warning);width:14px;height:14px">
+      内部空間ボックスを表示
+    </label>
+    <div id="boxControls" style="display:none">
+      <div class="inp-group">
+        <label>幅 (X軸)</label>
+        <div class="inp-row">
+          <input type="number" id="boxX" value="100" step="1" min="1">
+          <span class="unit">mm</span>
+        </div>
+      </div>
+      <div class="inp-group">
+        <label>高さ (Y軸)</label>
+        <div class="inp-row">
+          <input type="number" id="boxY" value="50" step="1" min="1">
+          <span class="unit">mm</span>
+        </div>
+      </div>
+      <div class="inp-group">
+        <label>奥行 (Z軸)</label>
+        <div class="inp-row">
+          <input type="number" id="boxZ" value="60" step="1" min="1">
+          <span class="unit">mm</span>
+        </div>
+      </div>
+      <div class="cur" id="boxVolume"></div>
+    </div>
+  </div>
+
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+// ── state ──────────────────────────────────────────────────────
+let originalGeo = null;
+let currentGeo  = null;
+let scaledGeo   = null;
+let rotMatrix   = new THREE.Matrix4();
+let scene, renderer, mainMesh, scaledMesh;
+let perspCamera, orthoCamera;
+let camera; // active camera
+let useOrtho = false;
+let spherical   = new THREE.Spherical(500, 1.1, 0.8);
+let orbiting    = false, lastMX = 0, lastMY = 0;
+
+const wheels    = { front: null, rear: null };
+let pickMode    = null;
+let activeAdj   = null;
+
+// 3D markers: { dot, torus } per wheel
+const markers   = { front: null, rear: null };
+
+function getTireR() {
+  return Math.max(1, parseFloat(document.getElementById('tireR').value) || 30);
+}
+
+function buildMarker(which) {
+  const t = getTheme() ? THEME.light : THEME.dark;
+  const color = which==='front' ? t.front : t.rear;
+  const pt = wheels[which];
+  if (!pt) return;
+
+  // 既存を完全削除してから再生成
+  removeMarker(which);
+
+  const r = getTireR();
+
+  // 中心点マーカー（球）
+  const dotGeo = new THREE.SphereGeometry(r*0.08, 12, 8);
+  const dotMat = new THREE.MeshBasicMaterial({ color, depthTest:false });
+  const dot = new THREE.Mesh(dotGeo, dotMat);
+  dot.position.copy(pt);
+  dot.renderOrder = 999;
+  scene.add(dot);
+
+  // タイヤ円（Torus, XY平面 = 側面から見た円）
+  const tGeo = new THREE.TorusGeometry(r, r*0.03, 8, 48);
+  const tMat = new THREE.MeshBasicMaterial({ color, wireframe:false, transparent:true, opacity:0.7, depthTest:false });
+  const torus = new THREE.Mesh(tGeo, tMat);
+  torus.position.copy(pt);
+  // TorusはXY平面にあるのでそのまま（側面ビューで円に見える）
+  torus.renderOrder = 998;
+  scene.add(torus);
+
+  // クロスヘア線（X方向）
+  const cross = new THREE.Group();
+  const lMat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.5, depthTest:false });
+  const hGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-r*1.3,0,0), new THREE.Vector3(r*1.3,0,0)]);
+  const vGeo = new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(0,-r*1.3,0), new THREE.Vector3(0,r*1.3,0)]);
+  cross.add(new THREE.Line(hGeo, lMat));
+  cross.add(new THREE.Line(vGeo, lMat));
+  cross.position.copy(pt);
+  cross.renderOrder = 999;
+  scene.add(cross);
+
+  markers[which] = { dot, torus, cross };
+}
+
+function removeMarker(which) {
+  const m = markers[which];
+  if (!m) return;
+  scene.remove(m.dot); scene.remove(m.torus); scene.remove(m.cross);
+  m.dot.geometry.dispose();
+  m.torus.geometry.dispose();
+  m.cross.children.forEach(c => c.geometry.dispose());
+  markers[which] = null;
+}
+
+document.getElementById('tireR').addEventListener('input', () => {
+  ['front','rear'].forEach(w => { if (wheels[w]) buildMarker(w); });
+});
+
+// ── Three.js ───────────────────────────────────────────────────
+function initThree() {
+  const vp = document.getElementById('viewport');
+  scene = new THREE.Scene();
+  scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue('--scene-bg').trim());
+  scene.add(new THREE.GridHelper(600,60,0x182030,0x111820));
+
+  // World axis arrows (permanent reference)
+  const addArr = (d,c) => scene.add(new THREE.ArrowHelper(d,new THREE.Vector3(),55,c,10,5));
+  addArr(new THREE.Vector3(1,0,0),0xff4455);
+  addArr(new THREE.Vector3(0,1,0),0x44ff88);
+  addArr(new THREE.Vector3(0,0,1),0x4488ff);
+
+  perspCamera = new THREE.PerspectiveCamera(45, vp.clientWidth/vp.clientHeight, 0.1, 10000);
+  orthoCamera  = new THREE.OrthographicCamera(-1,1,1,-1,0.1,10000);
+  camera = perspCamera;
+  syncCamera();
+
+  const cv = document.getElementById('canvas');
+  renderer = new THREE.WebGLRenderer({canvas:cv, antialias:true});
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(vp.clientWidth, vp.clientHeight);
+
+  scene.add(new THREE.AmbientLight(0xffffff,0.45));
+  window._light1 = new THREE.DirectionalLight(0x00e5ff,0.8); window._light1.position.set(300,400,200); scene.add(window._light1);
+  window._light2 = new THREE.DirectionalLight(0xff6b35,0.4); window._light2.position.set(-200,100,-200); scene.add(window._light2);
+
+  // orbit
+  cv.addEventListener('mousedown', e => {
+    if (pickMode) return;
+    orbiting=true; lastMX=e.clientX; lastMY=e.clientY;
+    vp.style.cursor='grabbing';
+  });
+  window.addEventListener('mousemove', e => {
+    if (!orbiting) return;
+    spherical.theta -= (e.clientX-lastMX)*0.005;
+    spherical.phi    = Math.max(0.05,Math.min(Math.PI-0.05, spherical.phi+(e.clientY-lastMY)*0.005));
+    syncCamera();
+    lastMX=e.clientX; lastMY=e.clientY;
+  });
+  window.addEventListener('mouseup',()=>{ orbiting=false; if(!pickMode) vp.style.cursor='grab'; });
+  cv.addEventListener('wheel',e=>{
+    spherical.radius=Math.max(30,Math.min(3000,spherical.radius+e.deltaY*0.4));
+    syncCamera();
+  });
+  cv.addEventListener('click', handleViewportClick);
+
+  window.addEventListener('resize',()=>{
+    const w2=vp.clientWidth, h2=vp.clientHeight;
+    perspCamera.aspect=w2/h2; perspCamera.updateProjectionMatrix();
+    updateOrthoSize();
+    renderer.setSize(w2,h2);
+  });
+
+  (function loop(){ requestAnimationFrame(loop); renderer.render(scene,camera); })();
+}
+
+function syncCamera() {
+  perspCamera.position.setFromSpherical(spherical);
+  perspCamera.lookAt(0,0,0);
+  // ortho: same direction, fixed Z distance
+  const dir = perspCamera.position.clone().normalize();
+  orthoCamera.position.copy(dir.multiplyScalar(spherical.radius));
+  orthoCamera.lookAt(0,0,0);
+  updateOrthoSize();
+}
+
+function updateOrthoSize() {
+  const vp = document.getElementById('viewport');
+  const aspect = vp.clientWidth / vp.clientHeight;
+  const h = spherical.radius * Math.tan(22.5 * Math.PI/180) * 2; // match persp FOV=45
+  orthoCamera.left   = -h/2 * aspect;
+  orthoCamera.right  =  h/2 * aspect;
+  orthoCamera.top    =  h/2;
+  orthoCamera.bottom = -h/2;
+  orthoCamera.updateProjectionMatrix();
+}
+
+function setOrtho(on) {
+  useOrtho = on;
+  camera = on ? orthoCamera : perspCamera;
+  syncCamera();
+}
+
+// ── Mini axis canvas ───────────────────────────────────────────
+// ── STL parse ──────────────────────────────────────────────────
+function parseSTL(buf) {
+  const view=new DataView(buf);
+  const tc=view.getUint32(80,true);
+  if (buf.byteLength===84+tc*50) return parseBin(buf,tc,view);
+  return parseASC(new TextDecoder().decode(buf));
+}
+function parseBin(buf,tc,view) {
+  const pos=new Float32Array(tc*9),nor=new Float32Array(tc*9);
+  let off=84;
+  for(let i=0;i<tc;i++){
+    const nx=view.getFloat32(off,true),ny=view.getFloat32(off+4,true),nz=view.getFloat32(off+8,true);
+    off+=12;
+    for(let j=0;j<3;j++){
+      const b=i*9+j*3;
+      pos[b]=view.getFloat32(off,true); pos[b+1]=view.getFloat32(off+4,true); pos[b+2]=view.getFloat32(off+8,true);
+      nor[b]=nx; nor[b+1]=ny; nor[b+2]=nz; off+=12;
+    }
+    off+=2;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('normal',  new THREE.BufferAttribute(nor,3));
+  return g;
+}
+function parseASC(text) {
+  const v=[],re=/vertex\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)\s+([\d.eE+\-]+)/g; let m;
+  while((m=re.exec(text))!==null) v.push(+m[1],+m[2],+m[3]);
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(v),3));
+  g.computeVertexNormals(); return g;
+}
+
+// ── Load ───────────────────────────────────────────────────────
+function loadSTL(buf) {
+  originalGeo = parseSTL(buf);
+  rotMatrix   = new THREE.Matrix4();
+  wheels.front=null; wheels.rear=null;
+  rebuildMesh(originalGeo.clone());
+  enableOrient(true);
+  document.getElementById('btnFront').disabled=false;
+  document.getElementById('btnRear').disabled=false;
+  document.getElementById('fileInfo').style.display='block';
+  setMsg('02: 右下の矢印を参考に進行方向=X、車高=Y になるよう回転ボタンで調整してください');
+}
+
+function rebuildMesh(g) {
+  currentGeo=g;
+  currentGeo.computeBoundingBox();
+  // center: XY center, Z bottom=0
+  const bb=currentGeo.boundingBox;
+  const cx=(bb.min.x+bb.max.x)/2, cz=(bb.min.z+bb.max.z)/2;
+  currentGeo.translate(-cx,-bb.min.y,-cz);
+  currentGeo.computeBoundingBox();
+
+  if (mainMesh)  scene.remove(mainMesh);
+  if (scaledMesh){ scene.remove(scaledMesh); scaledMesh=null; }
+  const mt = getTheme() ? THEME.light.model : THEME.dark.model;
+  const mat=new THREE.MeshPhongMaterial({
+    color:mt.color, specular:mt.specular, shininess:mt.shininess,
+    transparent:true, opacity:0.9, side:THREE.DoubleSide
+  });
+  mainMesh=new THREE.Mesh(currentGeo,mat); scene.add(mainMesh);
+
+  // fit camera
+  const s=new THREE.Vector3(); currentGeo.boundingBox.getSize(s);
+  spherical.radius=Math.max(s.x,s.y,s.z)*2.4; syncCamera();
+  refreshSizeInfo();
+}
+
+// ── Orientation ────────────────────────────────────────────────
+function enableOrient(on) {
+  ['rx+','rx-','ry+','ry-','rz+','rz-'].forEach(id=>document.getElementById(id).disabled=!on);
+}
+
+function rotateModel(axis,deg) {
+  if (!originalGeo) return;
+  const rad=deg*Math.PI/180, m=new THREE.Matrix4();
+  if (axis==='x') m.makeRotationX(rad);
+  if (axis==='y') m.makeRotationY(rad);
+  if (axis==='z') m.makeRotationZ(rad);
+  rotMatrix.premultiply(m);
+  const ng=originalGeo.clone(); ng.applyMatrix4(rotMatrix);
+  wheels.front=null; wheels.rear=null;
+  removeMarker('front'); removeMarker('rear');
+  updateWheelUI();
+  scaledGeo=null;
+  document.getElementById('dlBtn').disabled=true;
+  document.getElementById('applyBtn').disabled=true;
+  rebuildMesh(ng);
+}
+
+// bind rotation buttons
+['x','y','z'].forEach(ax=>{
+  ['+','-'].forEach(sign=>{
+    document.getElementById('r'+ax+sign).addEventListener('click',()=>rotateModel(ax,sign==='+'?90:-90));
+  });
+});
+
+// ── Wheel picking ──────────────────────────────────────────────
+function startPick(which) {
+  pickMode=which; activeAdj=which;
+  const vp=document.getElementById('viewport');
+  vp.style.cursor='crosshair';
+  const lbl=which==='front'?'前輪':'後輪';
+  setMsg(`[${lbl}] モデル側面をクリックして軸位置を指定`);
+  document.getElementById('btnFront').classList.toggle('active',which==='front');
+  document.getElementById('btnRear').classList.toggle('active', which==='rear');
+  document.getElementById('keyHint').style.display='block';
+  document.getElementById('wheelActions').style.display='block';
+
+  // 側面ビューへスムーズ移動 + 正投影に切り替え
+  animateCamera({ theta: 0, phi: Math.PI/2 }, 400);
+  setOrtho(true);
+}
+
+function confirmWheelAdj() {
+  // Y軸ロックが有効な場合、後輪のYを前輪に合わせる
+  applyLockY();
+  activeAdj=null;
+  setOrtho(false);
+  const btn=document.getElementById('camToggle');
+  btn.textContent='PERSP'; btn.style.borderColor='var(--border)'; btn.style.color='var(--text)';
+  document.getElementById('keyHint').style.display='none';
+  document.getElementById('btnFront').classList.remove('active');
+  document.getElementById('btnRear').classList.remove('active');
+  setMsg('04: 目標寸法を入力して「スケール適用」を押してください');
+}
+
+function applyLockY() {
+  if (!document.getElementById('lockY').checked) return;
+  if (!wheels.front || !wheels.rear) return;
+  // 両方が指定済みの場合: Yの平均値に揃える
+  const avgY = (wheels.front.y + wheels.rear.y) / 2;
+  wheels.front.y = avgY;
+  wheels.rear.y  = avgY;
+  buildMarker('front');
+  buildMarker('rear');
+  updateWheelUI();
+}
+
+// lockY チェック時に即座に適用
+document.getElementById('lockY').addEventListener('change', () => {
+  if (wheels.front && wheels.rear) applyLockY();
+});
+
+document.getElementById('confirmWheels').addEventListener('click', confirmWheelAdj);
+
+function animateCamera(target, duration) {
+  const start = { theta: spherical.theta, phi: spherical.phi };
+  // theta を最短経路で補間
+  let dt = ((target.theta - start.theta) % (Math.PI*2) + Math.PI*3) % (Math.PI*2) - Math.PI;
+  const startTime = performance.now();
+  function step(now) {
+    const t = Math.min((now - startTime) / duration, 1);
+    const ease = t < 0.5 ? 2*t*t : -1+(4-2*t)*t; // easeInOut
+    spherical.theta = start.theta + dt * ease;
+    spherical.phi   = start.phi   + (target.phi - start.phi) * ease;
+    syncCamera();
+    if (t < 1) requestAnimationFrame(step);
+  }
+  requestAnimationFrame(step);
+}
+
+function handleViewportClick(e) {
+  if (!pickMode||!mainMesh) return;
+  const vp=document.getElementById('viewport');
+  const rect=vp.getBoundingClientRect();
+  const nx=((e.clientX-rect.left)/rect.width)*2-1;
+  const ny=-((e.clientY-rect.top)/rect.height)*2+1;
+  const ray=new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2(nx,ny),camera);
+  const hits=ray.intersectObject(mainMesh);
+  let pt;
+  if (hits.length>0) { pt=hits[0].point.clone(); }
+  else {
+    pt=new THREE.Vector3();
+    ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0,0,1),0),pt);
+  }
+  const picked = pickMode;
+  wheels[picked]=pt;
+  pickMode=null;
+  // Y軸ロック中: 相手方が既に指定済みなら同じYに合わせる
+  if (document.getElementById('lockY').checked) {
+    const other = picked==='front' ? 'rear' : 'front';
+    if (wheels[other]) {
+      pt.y = wheels[other].y;
+      buildMarker(other);
+    }
+  }
+  buildMarker(picked);
+  updateWheelUI();
+  checkReady();
+  setMsg('矢印キーで微調整 / Tab前後切替 / Enter確定');
+}
+
+document.addEventListener('keydown',e=>{
+  // テキストボックスにフォーカス中はEsc以外スキップ
+  const tag = document.activeElement.tagName;
+  if ((tag==='INPUT'||tag==='TEXTAREA') && e.key!=='Escape') return;
+
+  if (e.key==='Escape'){
+    pickMode=null; activeAdj=null;
+    setOrtho(false);
+    const btn=document.getElementById('camToggle');
+    btn.textContent='PERSP'; btn.style.borderColor='var(--border)'; btn.style.color='var(--text)';
+    const vp=document.getElementById('viewport'); vp.style.cursor=currentGeo?'grab':'default';
+    document.getElementById('btnFront').classList.remove('active');
+    document.getElementById('btnRear').classList.remove('active');
+    document.getElementById('keyHint').style.display='none';
+    document.getElementById('wheelActions').style.display='none';
+    setMsg(''); return;
+  }
+  if (e.key==='Tab'&&(wheels.front||wheels.rear)){
+    e.preventDefault();
+    activeAdj=activeAdj==='front'?'rear':'front';
+    setMsg(`[${activeAdj==='front'?'前輪':'後輪'} 調整中] 矢印キー / Tab切替 / Enter確定`);
+    return;
+  }
+  if (e.key==='Enter'&&activeAdj){
+    e.preventDefault();
+    confirmWheelAdj();
+    document.getElementById('wheelActions').style.display='none';
+    return;
+  }
+  if (!activeAdj||!wheels[activeAdj]) return;
+  e.preventDefault();
+  const step=e.shiftKey?0.1:1.0, pt=wheels[activeAdj];
+  if (e.key==='ArrowLeft')  pt.x-=step;
+  if (e.key==='ArrowRight') pt.x+=step;
+  if (e.key==='ArrowUp')    pt.y+=step;
+  if (e.key==='ArrowDown')  pt.y-=step;
+  // Y軸ロック中は相手方の車輪のYも追従
+  if (document.getElementById('lockY').checked && (e.key==='ArrowUp'||e.key==='ArrowDown')) {
+    const other = activeAdj==='front' ? 'rear' : 'front';
+    if (wheels[other]) {
+      wheels[other].y = pt.y;
+      buildMarker(other);
+    }
+  }
+  buildMarker(activeAdj);
+  updateWheelUI(); checkReady();
+});
+
+document.getElementById('btnFront').addEventListener('click',()=>startPick('front'));
+document.getElementById('btnRear').addEventListener('click', ()=>startPick('rear'));
+
+function updateWheelUI() {
+  let html='';
+  const f=wheels.front,r=wheels.rear;
+  if(f) html+=`<div class="wf">FRONT X=${f.x.toFixed(1)} Y=${f.y.toFixed(1)}</div>`;
+  if(r) html+=`<div class="wr">REAR  X=${r.x.toFixed(1)} Y=${r.y.toFixed(1)}</div>`;
+  if(f&&r){
+    const wb=Math.abs(f.x-r.x);
+    html+=`<div class="wwb">WB = ${wb.toFixed(1)} mm</div>`;
+    document.getElementById('curWB').textContent=`現在値: ${wb.toFixed(1)} mm`;
+    document.getElementById('btnFront').classList.add('done');
+    document.getElementById('btnRear').classList.add('done');
+  }
+  document.getElementById('wheelInfo').innerHTML=html;
+  refreshSizeInfo();
+}
+
+function refreshSizeInfo() {
+  if (!currentGeo) return;
+  const bb=currentGeo.boundingBox,s=new THREE.Vector3(); bb.getSize(s);
+  document.getElementById('sizeX').textContent=s.x.toFixed(1)+' mm';
+  document.getElementById('sizeY').textContent=s.y.toFixed(1)+' mm';
+  document.getElementById('sizeZ').textContent=s.z.toFixed(1)+' mm';
+  document.getElementById('triCount').textContent=(currentGeo.attributes.position.count/3).toLocaleString();
+  document.getElementById('curH').textContent= `現在値: ${s.y.toFixed(1)} mm`;
+  document.getElementById('curTW').textContent=`現在値: ${s.z.toFixed(1)} mm`;
+}
+
+function checkReady() {
+  document.getElementById('applyBtn').disabled=!(currentGeo&&wheels.front&&wheels.rear);
+  updatePreview();
+}
+
+// ── Scale preview ──────────────────────────────────────────────
+function getScales() {
+  if (!currentGeo||!wheels.front||!wheels.rear) return null;
+  const bb=currentGeo.boundingBox, s=new THREE.Vector3(); bb.getSize(s);
+  const curWB=Math.abs(wheels.front.x-wheels.rear.x);
+  const tWB=parseFloat(document.getElementById('tWB').value);
+  const tTW=parseFloat(document.getElementById('tTW').value);
+  const tH =parseFloat(document.getElementById('tH').value);
+  return {
+    sx: isNaN(tWB)||curWB<0.01?1:tWB/curWB,
+    sy: isNaN(tH)  ?1:tH /s.y,
+    sz: isNaN(tTW) ?1:tTW/s.z
+  };
+}
+function updatePreview() {
+  const sc=getScales(); if(!sc) return;
+  document.getElementById('scalePreview').style.display='block';
+  const f=v=>v.toFixed(3)+'×';
+  document.getElementById('sxLbl').textContent=f(sc.sx);
+  document.getElementById('syLbl').textContent=f(sc.sy);
+  document.getElementById('szLbl').textContent=f(sc.sz);
+  const toW=v=>Math.min(100,Math.max(2,v*50))+'%';
+  document.getElementById('barX').style.width=toW(sc.sx);
+  document.getElementById('barY').style.width=toW(sc.sy);
+  document.getElementById('barZ').style.width=toW(sc.sz);
+}
+['tWB','tTW','tH'].forEach(id=>document.getElementById(id).addEventListener('input',updatePreview));
+
+// ── Apply ──────────────────────────────────────────────────────
+document.getElementById('applyBtn').addEventListener('click',()=>{
+  const sc=getScales(); if(!sc) return;
+  scaledGeo=currentGeo.clone();
+  scaledGeo.applyMatrix4(new THREE.Matrix4().makeScale(sc.sx,sc.sy,sc.sz));
+  scaledGeo.computeBoundingBox(); scaledGeo.computeVertexNormals();
+
+  if(scaledMesh) scene.remove(scaledMesh);
+
+  const th = getTheme() ? THEME.light : THEME.dark;
+
+  // 元モデルをゴースト表示
+  mainMesh.material = new THREE.MeshPhongMaterial({
+    color:th.ghost.color, specular:th.ghost.specular, shininess:th.ghost.shininess,
+    transparent:true, opacity:0.18, side:THREE.DoubleSide, depthWrite:false
+  });
+  mainMesh.visible = document.getElementById('ghostCheck').checked;
+
+  const mat=new THREE.MeshPhongMaterial({
+    color:th.scaled.color, specular:th.scaled.specular, shininess:th.scaled.shininess,
+    transparent:true, opacity:0.92, side:THREE.DoubleSide
+  });
+  scaledMesh=new THREE.Mesh(scaledGeo,mat); scene.add(scaledMesh);
+  document.getElementById('dlBtn').disabled=false;
+
+  const s=new THREE.Vector3(); scaledGeo.boundingBox.getSize(s);
+  document.getElementById('sizeX').textContent=s.x.toFixed(1)+' mm ✓';
+  document.getElementById('sizeY').textContent=s.y.toFixed(1)+' mm ✓';
+  document.getElementById('sizeZ').textContent=s.z.toFixed(1)+' mm ✓';
+  setMsg('✓ スケール適用完了 — 半透明=元モデル / 緑=スケール後');
+  if (document.getElementById('boxCheck').checked) { applyDefaultBoxSize(); buildInteriorBox(); }
+});
+
+// ── Export ─────────────────────────────────────────────────────
+function toBinarySTL(g) {
+  const pos=g.attributes.position,nor=g.attributes.normal,tc=pos.count/3;
+  const buf=new ArrayBuffer(84+tc*50), v=new DataView(buf);
+  new TextEncoder().encodeInto('RC Body Scaler',new Uint8Array(buf,0,80));
+  v.setUint32(80,tc,true);
+  let off=84;
+  for(let i=0;i<tc;i++){
+    const b=i*3;
+    v.setFloat32(off,  nor.getX(b),true); v.setFloat32(off+4,nor.getY(b),true); v.setFloat32(off+8,nor.getZ(b),true); off+=12;
+    for(let j=0;j<3;j++){
+      v.setFloat32(off,  pos.getX(b+j),true);
+      v.setFloat32(off+4,pos.getY(b+j),true);
+      v.setFloat32(off+8,pos.getZ(b+j),true); off+=12;
+    }
+    v.setUint16(off,0,true); off+=2;
+  }
+  return buf;
+}
+document.getElementById('dlBtn').addEventListener('click',()=>{
+  const g=scaledGeo||currentGeo; if(!g) return;
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([toBinarySTL(g)],{type:'application/octet-stream'}));
+  a.download='rc_body_scaled.stl'; a.click(); URL.revokeObjectURL(a.href);
+});
+
+// ── Reset ──────────────────────────────────────────────────────
+document.getElementById('resetBtn').addEventListener('click',()=>{
+  wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null;
+  removeMarker('front'); removeMarker('rear');
+  removeInteriorBox();
+  document.getElementById('boxCheck').checked = false;
+  document.getElementById('boxControls').style.display = 'none';
+  if(scaledMesh){scene.remove(scaledMesh);scaledMesh=null;}
+  if(mainMesh){
+    const mt = getTheme() ? THEME.light.model : THEME.dark.model;
+    mainMesh.material = new THREE.MeshPhongMaterial({
+      color:mt.color, specular:mt.specular, shininess:mt.shininess,
+      transparent:true, opacity:0.9, side:THREE.DoubleSide
+    });
+    mainMesh.visible=true;
+  }
+  document.getElementById('wheelInfo').innerHTML='';
+  document.getElementById('curWB').textContent='';
+  ['btnFront','btnRear'].forEach(id=>document.getElementById(id).classList.remove('done','active'));
+  document.getElementById('applyBtn').disabled=true;
+  document.getElementById('dlBtn').disabled=true;
+  document.getElementById('ghostCheck').checked=true;
+  document.getElementById('scalePreview').style.display='none';
+  document.getElementById('keyHint').style.display='none';
+  document.getElementById('wheelActions').style.display='none';
+  document.getElementById('lockY').checked=false;
+  ['tWB','tTW','tH'].forEach(id=>document.getElementById(id).value='');
+  setMsg('向きを確認したら前後輪を指定してください');
+  refreshSizeInfo();
+});
+
+// ── File input ─────────────────────────────────────────────────
+document.getElementById('uploadZone').addEventListener('click',()=>document.getElementById('fileInput').click());
+document.getElementById('fileInput').addEventListener('change',e=>{
+  const f=e.target.files[0]; if(!f) return;
+  document.getElementById('fileName').textContent=f.name;
+  const r=new FileReader(); r.onload=ev=>loadSTL(ev.target.result); r.readAsArrayBuffer(f);
+});
+const uz=document.getElementById('uploadZone');
+uz.addEventListener('dragover',e=>{e.preventDefault();uz.classList.add('drag')});
+uz.addEventListener('dragleave',()=>uz.classList.remove('drag'));
+uz.addEventListener('drop',e=>{
+  e.preventDefault(); uz.classList.remove('drag');
+  const f=e.dataTransfer.files[0]; if(!f||!f.name.toLowerCase().endsWith('.stl')) return;
+  document.getElementById('fileName').textContent=f.name;
+  const r=new FileReader(); r.onload=ev=>loadSTL(ev.target.result); r.readAsArrayBuffer(f);
+});
+
+document.getElementById('ghostCheck').addEventListener('change', e => {
+  if (mainMesh && scaledMesh) mainMesh.visible = e.target.checked;
+});
+
+// ── Interior Box ───────────────────────────────────────────────
+let interiorBox = null;
+
+function getDefaultBoxSize() {
+  const activeGeo = scaledGeo || currentGeo;
+  if (!activeGeo) return { x: 100, y: 50, z: 60 };
+  const bb = activeGeo.boundingBox;
+  const s = new THREE.Vector3(); bb.getSize(s);
+  // WB: スケール適用済みなら入力値、未適用なら前後輪指定距離、なければモデルX長
+  const tWBval = parseFloat(document.getElementById('tWB').value);
+  const wb = scaledGeo ? (isNaN(tWBval) ? s.x : tWBval)
+           : (wheels.front && wheels.rear) ? Math.abs(wheels.front.x - wheels.rear.x)
+           : s.x;
+  return {
+    x: Math.round(wb),
+    y: Math.round(s.y * 0.6),
+    z: Math.round(s.z * 0.7)
+  };
+}
+
+function applyDefaultBoxSize() {
+  const d = getDefaultBoxSize();
+  document.getElementById('boxX').value = d.x;
+  document.getElementById('boxY').value = d.y;
+  document.getElementById('boxZ').value = d.z;
+}
+
+function getBoxCenter() {
+  // ホイールベース線の中心: 前後輪X中点、Y=タイヤ半径、Z=0
+  const activeMesh = scaledMesh || mainMesh;
+  if (wheels.front && wheels.rear) {
+    const mx = (wheels.front.x + wheels.rear.x) / 2;
+    const my = wheels.front.y; // タイヤ中心Y
+    return new THREE.Vector3(mx, my, 0);
+  }
+  // ホイール未指定時はモデルBBの中心
+  if (activeMesh) {
+    const bb = (scaledGeo || currentGeo).boundingBox;
+    const c = new THREE.Vector3(); bb.getCenter(c);
+    return c;
+  }
+  return new THREE.Vector3();
+}
+
+function buildInteriorBox() {
+  if (interiorBox) { scene.remove(interiorBox); interiorBox = null; }
+  const bx = Math.max(1, parseFloat(document.getElementById('boxX').value) || 100);
+  const by = Math.max(1, parseFloat(document.getElementById('boxY').value) || 50);
+  const bz = Math.max(1, parseFloat(document.getElementById('boxZ').value) || 60);
+
+  const geo = new THREE.BoxGeometry(bx, by, bz);
+  // ワイヤーフレーム外枠
+  const edges = new THREE.EdgesGeometry(geo);
+  const boxColor = getTheme() ? THEME.light.box : THEME.dark.box;
+  const lineMat = new THREE.LineBasicMaterial({ color: boxColor, transparent: true, opacity: 0.9, depthTest: false });
+  interiorBox = new THREE.LineSegments(edges, lineMat);
+  interiorBox.renderOrder = 997;
+
+  // 半透明面
+  const faceMat = new THREE.MeshBasicMaterial({ color: boxColor, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthTest: false });
+  const faceMesh = new THREE.Mesh(geo, faceMat);
+  faceMesh.renderOrder = 996;
+  interiorBox.add(faceMesh);
+
+  const center = getBoxCenter();
+  // ボックス底面をタイヤ中心Yに合わせる（Y中心 = タイヤY + by/2）
+  interiorBox.position.set(center.x, center.y + by / 2, center.z);
+  scene.add(interiorBox);
+
+  document.getElementById('boxVolume').textContent =
+    `${bx.toFixed(0)}×${by.toFixed(0)}×${bz.toFixed(0)} mm  (${(bx*by*bz/1000).toFixed(0)} cm³)`;
+}
+
+function removeInteriorBox() {
+  if (interiorBox) { scene.remove(interiorBox); interiorBox = null; }
+}
+
+document.getElementById('boxCheck').addEventListener('change', e => {
+  document.getElementById('boxControls').style.display = e.target.checked ? 'block' : 'none';
+  if (e.target.checked) { applyDefaultBoxSize(); buildInteriorBox(); } else removeInteriorBox();
+});
+
+['boxX','boxY','boxZ'].forEach(id => {
+  document.getElementById(id).addEventListener('input', () => {
+    if (document.getElementById('boxCheck').checked) buildInteriorBox();
+  });
+});
+
+function setMsg(t){ document.getElementById('stepHint').textContent=t; }
+
+function toggleTheme() {
+  const isLight = document.documentElement.classList.toggle('light');
+  document.getElementById('themeToggle').textContent = isLight ? '🌙' : '☀';
+  setTimeout(() => {
+    const col = getComputedStyle(document.documentElement).getPropertyValue('--scene-bg').trim();
+    scene.background = new THREE.Color(col);
+    applyTheme3D(isLight);
+  }, 50);
+}
+
+function getTheme() {
+  return document.documentElement.classList.contains('light');
+}
+
+// テーマ別3D色定義
+const THEME = {
+  dark: {
+    model:    { color:0x1a2a3a, specular:0x00e5ff, shininess:60 },
+    scaled:   { color:0x0a2a18, specular:0x39d353, shininess:80 },
+    ghost:    { color:0x1a2a3a, specular:0x00e5ff, shininess:30 },
+    front:    0x00e5ff,   // シアン
+    rear:     0xff6b35,   // オレンジ
+    box:      0xf6c90e,   // 黄
+    light1:   { color:0x00e5ff, intensity:0.8 },
+    light2:   { color:0xff6b35, intensity:0.4 },
+  },
+  light: {
+    model:    { color:0x8ab0cc, specular:0x336688, shininess:50 },
+    scaled:   { color:0x5a9e72, specular:0x2d7a44, shininess:70 },
+    ghost:    { color:0x8ab0cc, specular:0x336688, shininess:20 },
+    front:    0x0077aa,   // 青（色弱対応）
+    rear:     0xcc5500,   // 橙（色弱対応）
+    box:      0x996600,   // 茶黄
+    light1:   { color:0x6699bb, intensity:0.6 },
+    light2:   { color:0xbb7733, intensity:0.3 },
+  }
+};
+
+function applyTheme3D(isLight) {
+  const t = isLight ? THEME.light : THEME.dark;
+  // ライト
+  if (window._light1) { window._light1.color.set(t.light1.color); window._light1.intensity=t.light1.intensity; }
+  if (window._light2) { window._light2.color.set(t.light2.color); window._light2.intensity=t.light2.intensity; }
+  // モデルマテリアル
+  if (mainMesh && !scaledMesh) {
+    mainMesh.material.color.set(t.model.color);
+    mainMesh.material.specular.set(t.model.specular);
+    mainMesh.material.shininess = t.model.shininess;
+  }
+  if (mainMesh && scaledMesh) {
+    mainMesh.material.color.set(t.ghost.color);
+    mainMesh.material.specular.set(t.ghost.specular);
+  }
+  if (scaledMesh) {
+    scaledMesh.material.color.set(t.scaled.color);
+    scaledMesh.material.specular.set(t.scaled.specular);
+    scaledMesh.material.shininess = t.scaled.shininess;
+  }
+  // マーカー再描画（色を反映）
+  ['front','rear'].forEach(w => { if (wheels[w]) buildMarker(w); });
+  // ボックス再描画
+  if (document.getElementById('boxCheck').checked) buildInteriorBox();
+}
+
+function toggleCamMode() {
+  // ホイール指定中はortho固定なので操作しない
+  if (activeAdj || pickMode) return;
+  setOrtho(!useOrtho);
+  const btn = document.getElementById('camToggle');
+  btn.textContent = useOrtho ? 'ORTHO' : 'PERSP';
+  btn.style.borderColor = useOrtho ? 'var(--accent)' : 'var(--border)';
+  btn.style.color       = useOrtho ? 'var(--accent)' : 'var(--text)';
+}
+
+initThree();
+</script>
+</body>
+</html>
