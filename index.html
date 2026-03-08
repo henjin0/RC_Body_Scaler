@@ -345,6 +345,45 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     </div>
   </div>
 
+  <div class="section">
+    <div class="sec-title">07 / Shell Thickness</div>
+    <div class="inp-group">
+      <label>手法</label>
+      <select id="shellMethod" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <option value="offset">法線オフセット — 頂点法線方向に押し込む</option>
+        <option value="scale">スケールシェル — 縮小コピーを内面に使用</option>
+      </select>
+    </div>
+    <div class="inp-group">
+      <label>肉厚 (mm)</label>
+      <div class="inp-row">
+        <input type="number" id="shellThk" placeholder="例: 1.5" step="0.1" min="0.1" value="1.5">
+        <span class="unit">mm</span>
+      </div>
+    </div>
+    <div class="inp-group">
+      <label>面フィルタ</label>
+      <select id="shellFilter" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <option value="none">なし — 全面処理</option>
+        <option value="outward">外向き面のみ（法線判定・高速）</option>
+        <option value="raycast">中心可視面のみ（レイキャスト・低速）</option>
+      </select>
+    </div>
+    <div class="inp-group">
+      <label>スムージング回数</label>
+      <div class="inp-row">
+        <input type="number" id="shellSmooth" placeholder="0" step="5" min="0" max="200" value="0">
+        <span class="unit">回</span>
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
+      <b style="color:var(--text)">法線オフセット</b>：各頂点法線方向に押し込み。スムージングで毛羽立ちを軽減。<br>
+      <b style="color:var(--text)">スケールシェル</b>：重心から縮小したコピーを内面に配置。スムージングで内面を抽象化。
+    </p>
+    <button class="apply-btn" id="shellBtn" disabled>▶ 肉厚を適用</button>
+    <button class="reset-btn" id="shellResetBtn" style="display:none;margin-top:6px">シェルをリセット</button>
+  </div>
+
 </div>
 
 <!-- About Modal -->
@@ -373,8 +412,9 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
 let originalGeo = null;
 let currentGeo  = null;
 let scaledGeo   = null;
+let shellGeo    = null;
 let rotMatrix   = new THREE.Matrix4();
-let scene, renderer, mainMesh, scaledMesh;
+let scene, renderer, mainMesh, scaledMesh, shellMesh;
 let perspCamera, orthoCamera;
 let camera; // active camera
 let useOrtho = false;
@@ -571,10 +611,13 @@ function loadSTL(buf) {
   originalGeo = parseSTL(buf);
   rotMatrix   = new THREE.Matrix4();
   wheels.front=null; wheels.rear=null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
+  document.getElementById('shellResetBtn').style.display='none';
   rebuildMesh(originalGeo.clone());
   enableOrient(true);
   document.getElementById('btnFront').disabled=false;
   document.getElementById('btnRear').disabled=false;
+  document.getElementById('shellBtn').disabled=false;
   document.getElementById('fileInfo').style.display='block';
   setMsg('02: 右下の矢印を参考に進行方向=X、車高=Y になるよう回転ボタンで調整してください');
 }
@@ -620,6 +663,8 @@ function rotateModel(axis,deg) {
   removeMarker('front'); removeMarker('rear');
   updateWheelUI();
   scaledGeo=null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
+  document.getElementById('shellResetBtn').style.display='none';
   document.getElementById('dlBtn').disabled=true;
   document.getElementById('applyBtn').disabled=true;
   rebuildMesh(ng);
@@ -897,7 +942,7 @@ function toBinarySTL(g) {
   return buf;
 }
 document.getElementById('dlBtn').addEventListener('click',()=>{
-  const g=scaledGeo||currentGeo; if(!g) return;
+  const g=shellGeo||scaledGeo||currentGeo; if(!g) return;
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([toBinarySTL(g)],{type:'application/octet-stream'}));
   a.download='rc_body_scaled.stl'; a.click(); URL.revokeObjectURL(a.href);
@@ -906,6 +951,8 @@ document.getElementById('dlBtn').addEventListener('click',()=>{
 // ── Reset ──────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
   wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
+  document.getElementById('shellResetBtn').style.display='none';
   removeMarker('front'); removeMarker('rear');
   removeInteriorBox();
   document.getElementById('boxCheck').checked = false;
@@ -1043,6 +1090,274 @@ document.getElementById('boxCheck').addEventListener('change', e => {
   });
 });
 
+// ── Shell Thickness ────────────────────────────────────────────
+function yld(msg) { setMsg(msg); return new Promise(r => setTimeout(r, 0)); }
+
+function weldGeo(srcGeo) {
+  const posAttr = srcGeo.attributes.position;
+  const count = posAttr.count;
+  const uniqueVerts = [], vertIndex = [], keyMap = new Map();
+  for (let i = 0; i < count; i++) {
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    const key = `${Math.round(x*1000)},${Math.round(y*1000)},${Math.round(z*1000)}`;
+    if (!keyMap.has(key)) { keyMap.set(key, uniqueVerts.length); uniqueVerts.push(new THREE.Vector3(x,y,z)); }
+    vertIndex.push(keyMap.get(key));
+  }
+  const nTri = count / 3;
+  const faces = [];
+  for (let i = 0; i < nTri; i++) faces.push([vertIndex[i*3], vertIndex[i*3+1], vertIndex[i*3+2]]);
+  return { uniqueVerts, faces };
+}
+
+// ラプラシアンスムージング: 頂点座標を隣接頂点の平均に置き換えて抽象化メッシュを生成
+function laplacianSmooth(uniqueVerts, faces, iterations) {
+  if (iterations <= 0) return uniqueVerts;
+  const n = uniqueVerts.length;
+  const adjSets = Array.from({length: n}, () => new Set());
+  for (const [a,b,c] of faces) {
+    adjSets[a].add(b); adjSets[a].add(c);
+    adjSets[b].add(a); adjSets[b].add(c);
+    adjSets[c].add(a); adjSets[c].add(b);
+  }
+  const adj = adjSets.map(s => [...s]);
+  let pos = uniqueVerts.map(v => v.clone());
+  for (let iter = 0; iter < iterations; iter++) {
+    const next = pos.map((p, i) => {
+      const nbrs = adj[i];
+      if (nbrs.length === 0) return p.clone();
+      const avg = new THREE.Vector3();
+      for (const j of nbrs) avg.add(pos[j]);
+      return avg.divideScalar(nbrs.length);
+    });
+    pos = next;
+  }
+  return pos;
+}
+
+// normVerts: 法線計算に使う頂点座標（省略時は uniqueVerts をそのまま使用）
+function buildShellGeo(uniqueVerts, faces, thickness, normVerts) {
+  // normVerts が指定されている場合はその抽象化メッシュの法線でオフセット方向を決定
+  const nv = normVerts || uniqueVerts;
+
+  // Area-weighted vertex normals (抽象化メッシュ基準)
+  const vertNormals = nv.map(() => new THREE.Vector3());
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _cr = new THREE.Vector3();
+  for (const [a,b,c] of faces) {
+    _e1.subVectors(nv[b], nv[a]);
+    _e2.subVectors(nv[c], nv[a]);
+    _cr.crossVectors(_e1, _e2);
+    vertNormals[a].add(_cr); vertNormals[b].add(_cr); vertNormals[c].add(_cr);
+  }
+  vertNormals.forEach(n => n.normalize());
+
+  // 内側頂点は元の座標位置から抽象化法線方向にオフセット
+  const innerVerts = uniqueVerts.map((v,i) => v.clone().addScaledVector(vertNormals[i], -thickness));
+
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces) {
+    for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  }
+  const boundaryEdges = [];
+  for (const [key] of dirEdge) {
+    const [a,b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) boundaryEdges.push([a,b]);
+  }
+
+  const positions = [], normals = [];
+  function addTri(p0, p1, p2) {
+    const e1 = new THREE.Vector3().subVectors(p1,p0);
+    const e2 = new THREE.Vector3().subVectors(p2,p0);
+    const n  = new THREE.Vector3().crossVectors(e1,e2).normalize();
+    for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
+  }
+  for (const [a,b,c] of faces) addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c]);
+  for (const [a,b,c] of faces) addTri(innerVerts[a], innerVerts[c], innerVerts[b]);
+  for (const [a,b] of boundaryEdges) {
+    addTri(uniqueVerts[a], uniqueVerts[b], innerVerts[b]);
+    addTri(uniqueVerts[a], innerVerts[b],  innerVerts[a]);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  g.computeBoundingBox();
+  return g;
+}
+
+// スケールシェル: 重心から縮小したコピーを内面に使い、境界を壁で結合
+// normVerts を渡すと内面の形状をスムージング済み座標で生成（抽象化）
+function buildShellGeoScale(uniqueVerts, faces, thickness, normVerts) {
+  // 重心計算
+  const centroid = new THREE.Vector3();
+  uniqueVerts.forEach(v => centroid.add(v));
+  centroid.divideScalar(uniqueVerts.length);
+
+  // 重心からの平均距離で縮小率を算出
+  let meanDist = 0;
+  for (const v of uniqueVerts) meanDist += v.distanceTo(centroid);
+  meanDist /= uniqueVerts.length;
+  const scale = Math.max(0.01, 1 - thickness / meanDist);
+
+  // 内面頂点 = 重心 + (基準頂点 - 重心) * scale
+  // スムージング済みの normVerts があればそちらを内面形状のベースに使う
+  const srcVerts = normVerts || uniqueVerts;
+  const innerVerts = srcVerts.map(v =>
+    centroid.clone().add(v.clone().sub(centroid).multiplyScalar(scale))
+  );
+
+  // 境界エッジ検出（フィルタ済みの faces を使う）
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces) {
+    for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  }
+  const boundaryEdges = [];
+  for (const [key] of dirEdge) {
+    const [a,b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) boundaryEdges.push([a,b]);
+  }
+
+  const positions = [], normals = [];
+  function addTri(p0, p1, p2) {
+    const e1 = new THREE.Vector3().subVectors(p1, p0);
+    const e2 = new THREE.Vector3().subVectors(p2, p0);
+    const n  = new THREE.Vector3().crossVectors(e1, e2).normalize();
+    for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
+  }
+  // 外面（元の形状）
+  for (const [a,b,c] of faces) addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c]);
+  // 内面（縮小コピー、裏向き）
+  for (const [a,b,c] of faces) addTri(innerVerts[a], innerVerts[c], innerVerts[b]);
+  // 壁（境界エッジを外・内でつなぐ）
+  for (const [a,b] of boundaryEdges) {
+    addTri(uniqueVerts[a], uniqueVerts[b], innerVerts[b]);
+    addTri(uniqueVerts[a], innerVerts[b],  innerVerts[a]);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  g.computeBoundingBox();
+  return g;
+}
+
+async function applyShell() {
+  const src = scaledGeo || currentGeo;
+  if (!src) return;
+  const thk = parseFloat(document.getElementById('shellThk').value);
+  if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
+  const method     = document.getElementById('shellMethod').value;
+  const filterMode = document.getElementById('shellFilter').value;
+  const smoothIter = Math.max(0, parseInt(document.getElementById('shellSmooth').value) || 0);
+
+  document.getElementById('shellBtn').disabled = true;
+  await yld('頂点を統合中...');
+
+  const { uniqueVerts, faces: allFaces } = weldGeo(src);
+  const total = allFaces.length;
+  let faces = allFaces;
+
+  // ── Face filter ──────────────────────────────────────────────
+  if (filterMode === 'outward') {
+    const centroid = new THREE.Vector3();
+    uniqueVerts.forEach(v => centroid.add(v));
+    centroid.divideScalar(uniqueVerts.length);
+    const fe1 = new THREE.Vector3(), fe2 = new THREE.Vector3();
+    faces = allFaces.filter(([a,b,c]) => {
+      const fc = new THREE.Vector3().add(uniqueVerts[a]).add(uniqueVerts[b]).add(uniqueVerts[c]).divideScalar(3);
+      fe1.subVectors(uniqueVerts[b], uniqueVerts[a]);
+      fe2.subVectors(uniqueVerts[c], uniqueVerts[a]);
+      return new THREE.Vector3().crossVectors(fe1,fe2).dot(new THREE.Vector3().subVectors(fc, centroid)) > 0;
+    });
+    await yld(`外向きフィルタ完了: ${total.toLocaleString()} → ${faces.length.toLocaleString()} 面`);
+
+  } else if (filterMode === 'raycast') {
+    const centroid = new THREE.Vector3();
+    uniqueVerts.forEach(v => centroid.add(v));
+    centroid.divideScalar(uniqueVerts.length);
+
+    // Build temp mesh once
+    const tmpPos = new Float32Array(total * 9);
+    let ti = 0;
+    for (const [a,b,c] of allFaces)
+      for (const idx of [a,b,c]) { tmpPos[ti++]=uniqueVerts[idx].x; tmpPos[ti++]=uniqueVerts[idx].y; tmpPos[ti++]=uniqueVerts[idx].z; }
+    const tmpGeo = new THREE.BufferGeometry();
+    tmpGeo.setAttribute('position', new THREE.BufferAttribute(tmpPos, 3));
+    const tmpMesh = new THREE.Mesh(tmpGeo, new THREE.MeshBasicMaterial({ side: THREE.DoubleSide }));
+    tmpMesh.updateMatrixWorld();
+
+    const ray = new THREE.Raycaster(); ray.near = 0;
+    const CHUNK = 200;
+    faces = [];
+    for (let i = 0; i < total; i += CHUNK) {
+      const end = Math.min(i + CHUNK, total);
+      for (let fi = i; fi < end; fi++) {
+        const [a,b,c] = allFaces[fi];
+        const fc = new THREE.Vector3().add(uniqueVerts[a]).add(uniqueVerts[b]).add(uniqueVerts[c]).divideScalar(3);
+        const toC = new THREE.Vector3().subVectors(centroid, fc);
+        const dist = toC.length();
+        if (dist < 0.001) { faces.push(allFaces[fi]); continue; }
+        const dir = toC.divideScalar(dist);
+        ray.set(fc.clone().addScaledVector(dir, 0.01), dir);
+        ray.far = dist - 0.01;
+        if (ray.intersectObject(tmpMesh, false).length === 0) faces.push(allFaces[fi]);
+      }
+      const pct = Math.round(end / total * 100);
+      await yld(`レイキャスト中... ${end.toLocaleString()} / ${total.toLocaleString()} 面 (${pct}%)`);
+    }
+    tmpGeo.dispose();
+    await yld(`レイキャスト完了: ${total.toLocaleString()} → ${faces.length.toLocaleString()} 面`);
+  }
+
+  // ── Laplacian smoothing (optional) ───────────────────────────
+  let normVerts = null;
+  if (smoothIter > 0) {
+    await yld(`ラプラシアンスムージング中 (${smoothIter}回)...`);
+    normVerts = laplacianSmooth(uniqueVerts, allFaces, smoothIter);
+  }
+
+  // ── Build shell ──────────────────────────────────────────────
+  await yld('シェルを構築中...');
+  try {
+    if (method === 'scale') {
+      shellGeo = buildShellGeoScale(uniqueVerts, faces, thk, normVerts);
+    } else {
+      shellGeo = buildShellGeo(uniqueVerts, faces, thk, normVerts);
+    }
+  } catch(err) {
+    setMsg('エラー: ' + err.message);
+    document.getElementById('shellBtn').disabled = false;
+    return;
+  }
+
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+  const th = getTheme() ? THEME.light : THEME.dark;
+  shellMesh = new THREE.Mesh(shellGeo, new THREE.MeshPhongMaterial({
+    color: th.scaled.color, specular: th.scaled.specular, shininess: th.scaled.shininess,
+    transparent: true, opacity: 0.92, side: THREE.DoubleSide
+  }));
+  scene.add(shellMesh);
+  if (mainMesh)   mainMesh.visible  = false;
+  if (scaledMesh) scaledMesh.visible = false;
+  document.getElementById('dlBtn').disabled = false;
+  document.getElementById('shellResetBtn').style.display = 'block';
+  document.getElementById('shellBtn').disabled = false;
+  const tc = shellGeo.attributes.position.count / 3;
+  setMsg(`✓ 肉厚適用完了 — ${tc.toLocaleString()} 三角形`);
+}
+
+function resetShell() {
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+  shellGeo = null;
+  // 元メッシュを再表示
+  if (scaledMesh) scaledMesh.visible = true;
+  else if (mainMesh) mainMesh.visible = true;
+  document.getElementById('shellResetBtn').style.display = 'none';
+  setMsg('シェルをリセットしました');
+}
+
+document.getElementById('shellBtn').addEventListener('click', applyShell);
+document.getElementById('shellResetBtn').addEventListener('click', resetShell);
+
 function setMsg(t){ document.getElementById('stepHint').textContent=t; }
 
 function toggleTheme() {
@@ -1102,6 +1417,11 @@ function applyTheme3D(isLight) {
     scaledMesh.material.color.set(t.scaled.color);
     scaledMesh.material.specular.set(t.scaled.specular);
     scaledMesh.material.shininess = t.scaled.shininess;
+  }
+  if (shellMesh) {
+    shellMesh.material.color.set(t.scaled.color);
+    shellMesh.material.specular.set(t.scaled.specular);
+    shellMesh.material.shininess = t.scaled.shininess;
   }
   // マーカー再描画（色を反映）
   ['front','rear'].forEach(w => { if (wheels[w]) buildMarker(w); });
