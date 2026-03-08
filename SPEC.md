@@ -9,6 +9,9 @@
 | 出力 | STL（バイナリ形式） |
 | 3Dライブラリ | Three.js r128（CDN） |
 | フォント | Share Tech Mono, Barlow Condensed（Google Fonts） |
+| 制作者 | henjin01_Fab |
+| GitHub | https://github.com/henjin0/RC_Body_Scaler |
+| Facebook | https://www.facebook.com/minoru.inoue.90 |
 
 ---
 
@@ -36,6 +39,7 @@ useOrtho     : boolean
 - `setOrtho(on)` で切り替え。ウィンドウリサイズ時に `updateOrthoSize()` を呼んで正投影サイズを再計算。
 - ホイール指定モード開始時に自動で ORTHO + 側面ビューへ遷移（easeInOut アニメーション）。確定後は PERSP に戻る。
 - ヘッダーの `PERSP / ORTHO` ボタンで手動切替可能。
+- ヘッダーの `ABOUT` ボタンでモーダルを表示（制作者・GitHub・Facebook リンク）。
 
 ---
 
@@ -78,6 +82,7 @@ useOrtho     : boolean
 - 矢印キー ↑↓ 時: 相手方の Y をリアルタイム同期して `buildMarker` を再描画
 - クリック新規指定時: 相手方が確定済みならそのYに合わせる
 - 確定ボタン押下時: 両輪の Y を平均値に揃えてから確定
+- 確定後は `pickMode` と `activeAdj` を両方 null にリセット（確定後のビューポートクリックで車輪位置が上書きされるバグを防ぐ）
 
 ### 04 / Target Dimensions
 - ホイールベース（X）・車高（Y）・トレッド幅（Z）を mm で入力
@@ -152,10 +157,11 @@ const THEME = {
 |------|------|
 | `loadSTL(buffer)` | バイナリ/ASCII を判定してパース、シーンに追加 |
 | `rotateModel(axis, deg)` | モデルを指定軸で回転、ホイールリセット |
-| `startWheelPick(which)` | 指定モード開始、ORTHO + 側面ビューへ遷移 |
+| `startPick(which)` | 指定モード開始、ORTHO + 側面ビューへ遷移 |
 | `buildMarker(which)` | 軸位置マーカー（球・Torus・十字線）を再描画 |
 | `removeMarker(which)` | マーカーを dispose して削除 |
-| `confirmPick()` | 確定処理、Y ロック平均化、PERSP に戻る |
+| `confirmWheelAdj()` | 確定処理、Y ロック平均化、`pickMode`/`activeAdj` リセット、PERSP に戻る |
+| `applyLockY()` | 両輪の Y を平均値に揃える |
 | `applyScale()` | scaledMesh を生成・表示 |
 | `buildInteriorBox()` | Interior Box ジオメトリを再生成 |
 | `exportSTL()` | scaledMesh をバイナリ STL としてダウンロード |
@@ -171,8 +177,10 @@ const THEME = {
 let scene, renderer, mainMesh, scaledMesh;
 let perspCamera, orthoCamera, camera;
 let useOrtho = false;
-let pickMode  = null;   // 'front' | 'rear' | null
-let wheels    = { front: null, rear: null };  // { x, y } mm
+let pickMode  = null;   // 'front' | 'rear' | null  ※確定時に必ず null にリセット
+let activeAdj = null;   // 'front' | 'rear' | null
+const wheels  = { front: null, rear: null };  // THREE.Vector3 (mm)
+const markers = { front: null, rear: null };  // { dot, torus, cross }
 // window._light1, window._light2: DirectionalLight
 ```
 
