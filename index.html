@@ -348,6 +348,13 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
   <div class="section">
     <div class="sec-title">07 / Shell Thickness</div>
     <div class="inp-group">
+      <label>手法</label>
+      <select id="shellMethod" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <option value="offset">法線オフセット — 頂点法線方向に押し込む</option>
+        <option value="scale">スケールシェル — 縮小コピーを内面に使用</option>
+      </select>
+    </div>
+    <div class="inp-group">
       <label>肉厚 (mm)</label>
       <div class="inp-row">
         <input type="number" id="shellThk" placeholder="例: 1.5" step="0.1" min="0.1" value="1.5">
@@ -363,15 +370,15 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
       </select>
     </div>
     <div class="inp-group">
-      <label>法線スムージング回数</label>
+      <label>スムージング回数</label>
       <div class="inp-row">
         <input type="number" id="shellSmooth" placeholder="0" step="5" min="0" max="200" value="0">
         <span class="unit">回</span>
       </div>
     </div>
     <p style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
-      内側方向に指定厚みのシェルを生成します。開口部（底面など）は元の形状を保ちます。<br>
-      スムージング &gt; 0 にすると抽象化メッシュの法線でオフセットし、毛羽立ちを軽減します。
+      <b style="color:var(--text)">法線オフセット</b>：各頂点法線方向に押し込み。スムージングで毛羽立ちを軽減。<br>
+      <b style="color:var(--text)">スケールシェル</b>：重心から縮小したコピーを内面に配置。スムージングで内面を抽象化。
     </p>
     <button class="apply-btn" id="shellBtn" disabled>▶ 肉厚を適用</button>
     <button class="reset-btn" id="shellResetBtn" style="display:none;margin-top:6px">シェルをリセット</button>
@@ -1177,11 +1184,68 @@ function buildShellGeo(uniqueVerts, faces, thickness, normVerts) {
   return g;
 }
 
+// スケールシェル: 重心から縮小したコピーを内面に使い、境界を壁で結合
+// normVerts を渡すと内面の形状をスムージング済み座標で生成（抽象化）
+function buildShellGeoScale(uniqueVerts, faces, thickness, normVerts) {
+  // 重心計算
+  const centroid = new THREE.Vector3();
+  uniqueVerts.forEach(v => centroid.add(v));
+  centroid.divideScalar(uniqueVerts.length);
+
+  // 重心からの平均距離で縮小率を算出
+  let meanDist = 0;
+  for (const v of uniqueVerts) meanDist += v.distanceTo(centroid);
+  meanDist /= uniqueVerts.length;
+  const scale = Math.max(0.01, 1 - thickness / meanDist);
+
+  // 内面頂点 = 重心 + (基準頂点 - 重心) * scale
+  // スムージング済みの normVerts があればそちらを内面形状のベースに使う
+  const srcVerts = normVerts || uniqueVerts;
+  const innerVerts = srcVerts.map(v =>
+    centroid.clone().add(v.clone().sub(centroid).multiplyScalar(scale))
+  );
+
+  // 境界エッジ検出（フィルタ済みの faces を使う）
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces) {
+    for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  }
+  const boundaryEdges = [];
+  for (const [key] of dirEdge) {
+    const [a,b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) boundaryEdges.push([a,b]);
+  }
+
+  const positions = [], normals = [];
+  function addTri(p0, p1, p2) {
+    const e1 = new THREE.Vector3().subVectors(p1, p0);
+    const e2 = new THREE.Vector3().subVectors(p2, p0);
+    const n  = new THREE.Vector3().crossVectors(e1, e2).normalize();
+    for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
+  }
+  // 外面（元の形状）
+  for (const [a,b,c] of faces) addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c]);
+  // 内面（縮小コピー、裏向き）
+  for (const [a,b,c] of faces) addTri(innerVerts[a], innerVerts[c], innerVerts[b]);
+  // 壁（境界エッジを外・内でつなぐ）
+  for (const [a,b] of boundaryEdges) {
+    addTri(uniqueVerts[a], uniqueVerts[b], innerVerts[b]);
+    addTri(uniqueVerts[a], innerVerts[b],  innerVerts[a]);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  g.computeBoundingBox();
+  return g;
+}
+
 async function applyShell() {
   const src = scaledGeo || currentGeo;
   if (!src) return;
   const thk = parseFloat(document.getElementById('shellThk').value);
   if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
+  const method     = document.getElementById('shellMethod').value;
   const filterMode = document.getElementById('shellFilter').value;
   const smoothIter = Math.max(0, parseInt(document.getElementById('shellSmooth').value) || 0);
 
@@ -1254,7 +1318,11 @@ async function applyShell() {
   // ── Build shell ──────────────────────────────────────────────
   await yld('シェルを構築中...');
   try {
-    shellGeo = buildShellGeo(uniqueVerts, faces, thk, normVerts);
+    if (method === 'scale') {
+      shellGeo = buildShellGeoScale(uniqueVerts, faces, thk, normVerts);
+    } else {
+      shellGeo = buildShellGeo(uniqueVerts, faces, thk, normVerts);
+    }
   } catch(err) {
     setMsg('エラー: ' + err.message);
     document.getElementById('shellBtn').disabled = false;
