@@ -345,6 +345,23 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     </div>
   </div>
 
+  <div class="section">
+    <div class="sec-title">07 / Shell Thickness</div>
+    <div class="inp-group">
+      <label>肉厚 (mm)</label>
+      <div class="inp-row">
+        <input type="number" id="shellThk" placeholder="例: 1.5" step="0.1" min="0.1" value="1.5">
+        <span class="unit">mm</span>
+      </div>
+    </div>
+    <p style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
+      内側方向に指定厚みのシェルを生成します。<br>
+      開口部（底面など）は元の形状を保ちます。
+    </p>
+    <button class="apply-btn" id="shellBtn" disabled>▶ 肉厚を適用</button>
+    <button class="reset-btn" id="shellResetBtn" style="display:none;margin-top:6px">シェルをリセット</button>
+  </div>
+
 </div>
 
 <!-- About Modal -->
@@ -373,8 +390,9 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
 let originalGeo = null;
 let currentGeo  = null;
 let scaledGeo   = null;
+let shellGeo    = null;
 let rotMatrix   = new THREE.Matrix4();
-let scene, renderer, mainMesh, scaledMesh;
+let scene, renderer, mainMesh, scaledMesh, shellMesh;
 let perspCamera, orthoCamera;
 let camera; // active camera
 let useOrtho = false;
@@ -571,10 +589,13 @@ function loadSTL(buf) {
   originalGeo = parseSTL(buf);
   rotMatrix   = new THREE.Matrix4();
   wheels.front=null; wheels.rear=null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
+  document.getElementById('shellResetBtn').style.display='none';
   rebuildMesh(originalGeo.clone());
   enableOrient(true);
   document.getElementById('btnFront').disabled=false;
   document.getElementById('btnRear').disabled=false;
+  document.getElementById('shellBtn').disabled=false;
   document.getElementById('fileInfo').style.display='block';
   setMsg('02: 右下の矢印を参考に進行方向=X、車高=Y になるよう回転ボタンで調整してください');
 }
@@ -620,6 +641,8 @@ function rotateModel(axis,deg) {
   removeMarker('front'); removeMarker('rear');
   updateWheelUI();
   scaledGeo=null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
+  document.getElementById('shellResetBtn').style.display='none';
   document.getElementById('dlBtn').disabled=true;
   document.getElementById('applyBtn').disabled=true;
   rebuildMesh(ng);
@@ -897,7 +920,7 @@ function toBinarySTL(g) {
   return buf;
 }
 document.getElementById('dlBtn').addEventListener('click',()=>{
-  const g=scaledGeo||currentGeo; if(!g) return;
+  const g=shellGeo||scaledGeo||currentGeo; if(!g) return;
   const a=document.createElement('a');
   a.href=URL.createObjectURL(new Blob([toBinarySTL(g)],{type:'application/octet-stream'}));
   a.download='rc_body_scaled.stl'; a.click(); URL.revokeObjectURL(a.href);
@@ -906,6 +929,8 @@ document.getElementById('dlBtn').addEventListener('click',()=>{
 // ── Reset ──────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
   wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
+  document.getElementById('shellResetBtn').style.display='none';
   removeMarker('front'); removeMarker('rear');
   removeInteriorBox();
   document.getElementById('boxCheck').checked = false;
@@ -1043,6 +1068,120 @@ document.getElementById('boxCheck').addEventListener('change', e => {
   });
 });
 
+// ── Shell Thickness ────────────────────────────────────────────
+function computeShellGeo(srcGeo, thickness) {
+  const posAttr = srcGeo.attributes.position;
+  const count = posAttr.count;
+
+  // 1. Weld vertices by position (0.001 mm grid)
+  const uniqueVerts = [];
+  const vertIndex   = [];
+  const keyMap      = new Map();
+  for (let i = 0; i < count; i++) {
+    const x = posAttr.getX(i), y = posAttr.getY(i), z = posAttr.getZ(i);
+    const key = `${Math.round(x*1000)},${Math.round(y*1000)},${Math.round(z*1000)}`;
+    if (!keyMap.has(key)) { keyMap.set(key, uniqueVerts.length); uniqueVerts.push(new THREE.Vector3(x,y,z)); }
+    vertIndex.push(keyMap.get(key));
+  }
+
+  const nTri  = count / 3;
+  const faces = [];
+  for (let i = 0; i < nTri; i++) faces.push([vertIndex[i*3], vertIndex[i*3+1], vertIndex[i*3+2]]);
+
+  // 2. Area-weighted vertex normals
+  const vertNormals = uniqueVerts.map(() => new THREE.Vector3());
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _cr = new THREE.Vector3();
+  for (const [a,b,c] of faces) {
+    _e1.subVectors(uniqueVerts[b], uniqueVerts[a]);
+    _e2.subVectors(uniqueVerts[c], uniqueVerts[a]);
+    _cr.crossVectors(_e1, _e2); // magnitude = 2*area, direction = face normal
+    vertNormals[a].add(_cr); vertNormals[b].add(_cr); vertNormals[c].add(_cr);
+  }
+  vertNormals.forEach(n => n.normalize());
+
+  // 3. Inner vertices (offset inward = -normal * thickness)
+  const innerVerts = uniqueVerts.map((v,i) => v.clone().addScaledVector(vertNormals[i], -thickness));
+
+  // 4. Boundary edges: directed edge [a,b] is boundary if [b,a] does not exist
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces) {
+    for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  }
+  const boundaryEdges = [];
+  for (const [key] of dirEdge) {
+    const [a,b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) boundaryEdges.push([a,b]);
+  }
+
+  // 5. Assemble output geometry
+  const positions = [], normals = [];
+  function addTri(p0, p1, p2) {
+    const e1 = new THREE.Vector3().subVectors(p1,p0);
+    const e2 = new THREE.Vector3().subVectors(p2,p0);
+    const n  = new THREE.Vector3().crossVectors(e1,e2).normalize();
+    for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
+  }
+  // Outer surface (original winding)
+  for (const [a,b,c] of faces) addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c]);
+  // Inner surface (flipped winding = normals pointing inward)
+  for (const [a,b,c] of faces) addTri(innerVerts[a], innerVerts[c], innerVerts[b]);
+  // Wall strips along boundary edges
+  for (const [a,b] of boundaryEdges) {
+    const oA=uniqueVerts[a], oB=uniqueVerts[b], iA=innerVerts[a], iB=innerVerts[b];
+    addTri(oA, oB, iB);
+    addTri(oA, iB, iA);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  g.computeBoundingBox();
+  return g;
+}
+
+function applyShell() {
+  const src = scaledGeo || currentGeo;
+  if (!src) return;
+  const thk = parseFloat(document.getElementById('shellThk').value);
+  if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
+  setMsg('肉厚を計算中...');
+  setTimeout(() => {
+    try {
+      shellGeo = computeShellGeo(src, thk);
+    } catch(err) {
+      setMsg('エラー: ' + err.message); return;
+    }
+    if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+    const th = getTheme() ? THEME.light : THEME.dark;
+    const mat = new THREE.MeshPhongMaterial({
+      color: th.scaled.color, specular: th.scaled.specular, shininess: th.scaled.shininess,
+      transparent: true, opacity: 0.92, side: THREE.DoubleSide
+    });
+    shellMesh = new THREE.Mesh(shellGeo, mat);
+    scene.add(shellMesh);
+    // 元メッシュは非表示
+    if (mainMesh)   mainMesh.visible  = false;
+    if (scaledMesh) scaledMesh.visible = false;
+    document.getElementById('dlBtn').disabled = false;
+    document.getElementById('shellResetBtn').style.display = 'block';
+    const tc = shellGeo.attributes.position.count / 3;
+    setMsg(`✓ 肉厚適用完了 — ${tc.toLocaleString()} 三角形`);
+  }, 0);
+}
+
+function resetShell() {
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+  shellGeo = null;
+  // 元メッシュを再表示
+  if (scaledMesh) scaledMesh.visible = true;
+  else if (mainMesh) mainMesh.visible = true;
+  document.getElementById('shellResetBtn').style.display = 'none';
+  setMsg('シェルをリセットしました');
+}
+
+document.getElementById('shellBtn').addEventListener('click', applyShell);
+document.getElementById('shellResetBtn').addEventListener('click', resetShell);
+
 function setMsg(t){ document.getElementById('stepHint').textContent=t; }
 
 function toggleTheme() {
@@ -1102,6 +1241,11 @@ function applyTheme3D(isLight) {
     scaledMesh.material.color.set(t.scaled.color);
     scaledMesh.material.specular.set(t.scaled.specular);
     scaledMesh.material.shininess = t.scaled.shininess;
+  }
+  if (shellMesh) {
+    shellMesh.material.color.set(t.scaled.color);
+    shellMesh.material.specular.set(t.scaled.specular);
+    shellMesh.material.shininess = t.scaled.shininess;
   }
   // マーカー再描画（色を反映）
   ['front','rear'].forEach(w => { if (wheels[w]) buildMarker(w); });
