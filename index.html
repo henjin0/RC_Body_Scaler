@@ -354,6 +354,10 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
         <span class="unit">mm</span>
       </div>
     </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:10px">
+      <input type="checkbox" id="shellOutward" style="accent-color:var(--accent);width:14px;height:14px">
+      中心から外向きの面のみ処理
+    </label>
     <p style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
       内側方向に指定厚みのシェルを生成します。<br>
       開口部（底面など）は元の形状を保ちます。
@@ -1069,7 +1073,7 @@ document.getElementById('boxCheck').addEventListener('change', e => {
 });
 
 // ── Shell Thickness ────────────────────────────────────────────
-function computeShellGeo(srcGeo, thickness) {
+function computeShellGeo(srcGeo, thickness, outwardOnly = false) {
   const posAttr = srcGeo.attributes.position;
   const count = posAttr.count;
 
@@ -1084,9 +1088,24 @@ function computeShellGeo(srcGeo, thickness) {
     vertIndex.push(keyMap.get(key));
   }
 
-  const nTri  = count / 3;
-  const faces = [];
+  const nTri = count / 3;
+  let faces  = [];
   for (let i = 0; i < nTri; i++) faces.push([vertIndex[i*3], vertIndex[i*3+1], vertIndex[i*3+2]]);
+
+  // 1b. Optional: keep only faces whose normal points away from model centroid
+  if (outwardOnly) {
+    const centroid = new THREE.Vector3();
+    uniqueVerts.forEach(v => centroid.add(v));
+    centroid.divideScalar(uniqueVerts.length);
+    const _fe1 = new THREE.Vector3(), _fe2 = new THREE.Vector3();
+    faces = faces.filter(([a,b,c]) => {
+      const fc = new THREE.Vector3().add(uniqueVerts[a]).add(uniqueVerts[b]).add(uniqueVerts[c]).divideScalar(3);
+      _fe1.subVectors(uniqueVerts[b], uniqueVerts[a]);
+      _fe2.subVectors(uniqueVerts[c], uniqueVerts[a]);
+      const n = new THREE.Vector3().crossVectors(_fe1, _fe2);
+      return n.dot(fc.sub(centroid)) > 0; // outward-facing
+    });
+  }
 
   // 2. Area-weighted vertex normals
   const vertNormals = uniqueVerts.map(() => new THREE.Vector3());
@@ -1144,10 +1163,11 @@ function applyShell() {
   if (!src) return;
   const thk = parseFloat(document.getElementById('shellThk').value);
   if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
+  const outwardOnly = document.getElementById('shellOutward').checked;
   setMsg('肉厚を計算中...');
   setTimeout(() => {
     try {
-      shellGeo = computeShellGeo(src, thk);
+      shellGeo = computeShellGeo(src, thk, outwardOnly);
     } catch(err) {
       setMsg('エラー: ' + err.message); return;
     }
