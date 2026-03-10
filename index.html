@@ -413,6 +413,7 @@ let originalGeo = null;
 let currentGeo  = null;
 let scaledGeo   = null;
 let shellGeo    = null;
+let appliedScales = null;  // applyScale() 実行時の { sx, sy, sz } を保持
 let rotMatrix   = new THREE.Matrix4();
 let scene, renderer, mainMesh, scaledMesh, shellMesh;
 let perspCamera, orthoCamera;
@@ -662,7 +663,7 @@ function rotateModel(axis,deg) {
   wheels.front=null; wheels.rear=null;
   removeMarker('front'); removeMarker('rear');
   updateWheelUI();
-  scaledGeo=null;
+  scaledGeo=null; appliedScales=null;
   if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
   document.getElementById('shellResetBtn').style.display='none';
   document.getElementById('dlBtn').disabled=true;
@@ -892,6 +893,7 @@ function updatePreview() {
 // ── Apply ──────────────────────────────────────────────────────
 document.getElementById('applyBtn').addEventListener('click',()=>{
   const sc=getScales(); if(!sc) return;
+  appliedScales = sc;
   scaledGeo=currentGeo.clone();
   scaledGeo.applyMatrix4(new THREE.Matrix4().makeScale(sc.sx,sc.sy,sc.sz));
   scaledGeo.computeBoundingBox(); scaledGeo.computeVertexNormals();
@@ -950,7 +952,7 @@ document.getElementById('dlBtn').addEventListener('click',()=>{
 
 // ── Reset ──────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
-  wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null;
+  wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null; appliedScales=null;
   if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
   document.getElementById('shellResetBtn').style.display='none';
   removeMarker('front'); removeMarker('rear');
@@ -1033,8 +1035,10 @@ function getBoxCenter() {
   // ホイールベース線の中心: 前後輪X中点、Y=タイヤ半径、Z=0
   const activeMesh = scaledMesh || mainMesh;
   if (wheels.front && wheels.rear) {
-    const mx = (wheels.front.x + wheels.rear.x) / 2;
-    const my = wheels.front.y; // タイヤ中心Y
+    // スケール適用済みの場合、ホイール座標を倍率で補正する
+    const sc = appliedScales || { sx: 1, sy: 1, sz: 1 };
+    const mx = (wheels.front.x + wheels.rear.x) / 2 * sc.sx;
+    const my = wheels.front.y * sc.sy; // タイヤ中心Y
     return new THREE.Vector3(mx, my, 0);
   }
   // ホイール未指定時はモデルBBの中心
