@@ -350,8 +350,12 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     <div class="inp-group">
       <label>手法</label>
       <select id="shellMethod" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <option value="hollow">クローズドホロー — 閉じたソリッドを中空化（AI生成モデル推奨）</option>
         <option value="offset">法線オフセット — 頂点法線方向に押し込む</option>
         <option value="scale">スケールシェル — 縮小コピーを内面に使用</option>
+        <option value="sdf">SDF補正オフセット — SDF勾配で法線を精密化</option>
+        <option value="planb">シュリンクラップ — 等距離補正で内面を生成</option>
+        <option value="solidcap">ソリッドキャップ — 底面を水平化して二層化解消</option>
       </select>
     </div>
     <div class="inp-group">
@@ -361,27 +365,59 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
         <span class="unit">mm</span>
       </div>
     </div>
-    <div class="inp-group">
+    <div class="inp-group" id="shellFilterGroup">
       <label>面フィルタ</label>
-      <select id="shellFilter" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+      <select id="shellFilter" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none;transition:opacity .2s">
         <option value="none">なし — 全面処理</option>
         <option value="outward">外向き面のみ（法線判定・高速）</option>
         <option value="raycast">中心可視面のみ（レイキャスト・低速）</option>
       </select>
     </div>
-    <div class="inp-group">
+    <div class="inp-group" id="shellSmoothGroup">
       <label>スムージング回数</label>
       <div class="inp-row">
         <input type="number" id="shellSmooth" placeholder="0" step="5" min="0" max="200" value="0">
         <span class="unit">回</span>
       </div>
     </div>
-    <p style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
+    <div class="inp-group" id="shellRepairGroup" style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" id="shellRepair" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent);cursor:pointer">
+      <label for="shellRepair" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">メッシュ修復してから適用<br><span style="color:var(--dim)">縮退除去 → 法線統一 → 穴埋め</span></label>
+    </div>
+    <div class="inp-group" style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" id="shellColorize" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent2);cursor:pointer">
+      <label for="shellColorize" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">部位カラー表示<br><span style="color:var(--dim)"><span style="color:#00d9ff">■</span> 外面 &nbsp;<span style="color:#38d450">■</span> 内面 &nbsp;<span style="color:#ff8c1a">■</span> 底面リング</span></label>
+    </div>
+    <div class="inp-group" style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" id="shellCutTire" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent2);cursor:pointer">
+      <label for="shellCutTire" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">タイヤ穴をくり抜く<br><span style="color:var(--dim)">オリジナル座標でZ全貫通カット → スケール適用 — オレンジ円筒で可視化</span></label>
+    </div>
+    <div id="tireCutPanel" style="display:none;margin-left:22px;margin-bottom:6px">
+      <div class="inp-group">
+        <label>クリアランス (mm)</label>
+        <div class="inp-row">
+          <input type="number" id="tireClearance" placeholder="例: 2" step="0.5" min="0" value="2">
+          <span class="unit">mm</span>
+        </div>
+      </div>
+    </div>
+    <p id="shellHint" style="font-size:11px;color:var(--dim);line-height:1.6;margin-bottom:10px">
       <b style="color:var(--text)">法線オフセット</b>：各頂点法線方向に押し込み。スムージングで毛羽立ちを軽減。<br>
-      <b style="color:var(--text)">スケールシェル</b>：重心から縮小したコピーを内面に配置。スムージングで内面を抽象化。
+      <b style="color:var(--text)">スケールシェル</b>：縮小コピーを内面に配置。スムージングで内面を抽象化。<br>
+      <b style="color:var(--text)">SDF補正</b>：UDF勾配で法線を精密化しスパイクを抑制。<br>
+      <b style="color:var(--text)">シュリンクラップ</b>：法線不使用。等距離補正で確実に thickness を実現。
     </p>
     <button class="apply-btn" id="shellBtn" disabled>▶ 肉厚を適用</button>
     <button class="reset-btn" id="shellResetBtn" style="display:none;margin-top:6px">シェルをリセット</button>
+    <div id="shellPostSmooth" style="display:none;margin-top:8px">
+      <div style="font-size:10px;letter-spacing:1px;color:var(--dim);margin-bottom:5px;text-transform:uppercase">後スムージング</div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <input type="number" id="shellPostIter" value="10" min="1" max="300" step="5"
+          style="flex:1;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:6px 8px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <span class="unit">回</span>
+        <button id="shellPostBtn" style="border:1px solid var(--border);background:transparent;color:var(--text);padding:6px 10px;font-family:'Barlow Condensed',sans-serif;font-size:12px;letter-spacing:1px;cursor:pointer;white-space:nowrap" onmouseover="this.style.borderColor='var(--accent)';this.style.color='var(--accent)'" onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--text)'">▶ 適用</button>
+      </div>
+    </div>
   </div>
 
 </div>
@@ -413,8 +449,10 @@ let originalGeo = null;
 let currentGeo  = null;
 let scaledGeo   = null;
 let shellGeo    = null;
+let appliedScales = null;  // applyScale() 実行時の { sx, sy, sz } を保持
 let rotMatrix   = new THREE.Matrix4();
 let scene, renderer, mainMesh, scaledMesh, shellMesh;
+let tireCylinderMeshes = [];  // タイヤ穴くり抜き可視化用シリンダーメッシュ群
 let perspCamera, orthoCamera;
 let camera; // active camera
 let useOrtho = false;
@@ -486,7 +524,85 @@ function removeMarker(which) {
 
 document.getElementById('tireR').addEventListener('input', () => {
   ['front','rear'].forEach(w => { if (wheels[w]) buildMarker(w); });
+  buildTireCylinders();
 });
+
+// ── タイヤくり抜き円筒可視化 ───────────────────────────────────
+// オリジナル座標系（スケール前）で前後輪の切削シリンダーをシーンに表示する。
+// 実際のカットもオリジナル座標で行い、その後スケールを適用する。
+function buildTireCylinders() {
+  removeTireCylinders();
+  if (!document.getElementById('shellCutTire').checked) return;
+  if (!wheels.front && !wheels.rear) return;
+
+  // タイヤ穴はオリジナル座標でカットするため、可視化もオリジナル座標で表示
+  const tireRaw = Math.max(1, parseFloat(document.getElementById('tireR').value) || 30);
+  const clearance = Math.max(0, parseFloat(document.getElementById('tireClearance').value) || 2);
+  const cutR = tireRaw + clearance;
+
+  // オリジナルモデルのZ範囲でシリンダー高さを決定
+  const refGeo = currentGeo;
+  let zHalf = 200;
+  if (refGeo?.boundingBox) {
+    const sz = new THREE.Vector3();
+    refGeo.boundingBox.getSize(sz);
+    zHalf = sz.z * 0.5 + 10;
+  }
+
+  const addCyl = (wx, wy) => {
+    // 半透明ソリッド（切削ボリューム）
+    const geo = new THREE.CylinderGeometry(cutR, cutR, zHalf * 2, 48, 1, true);
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xff5500, transparent: true, opacity: 0.14,
+      side: THREE.DoubleSide, depthWrite: false
+    });
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.rotation.x = Math.PI / 2;  // Y軸→Z軸に回転
+    mesh.position.set(wx, wy, 0);
+    mesh.renderOrder = 500;
+    scene.add(mesh);
+    tireCylinderMeshes.push(mesh);
+
+    // 上下端の円弧ライン
+    const lMat = new THREE.LineBasicMaterial({ color: 0xff5500, transparent: true, opacity: 0.8, depthTest: false });
+    for (const z of [-zHalf, zHalf]) {
+      const pts = [];
+      for (let i = 0; i <= 64; i++) {
+        const a = (i / 64) * Math.PI * 2;
+        pts.push(new THREE.Vector3(wx + Math.cos(a) * cutR, wy + Math.sin(a) * cutR, z));
+      }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMat);
+      line.renderOrder = 501;
+      scene.add(line);
+      tireCylinderMeshes.push(line);
+    }
+    // 縦方向の線（4本）
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      const vpts = [
+        new THREE.Vector3(wx + Math.cos(a) * cutR, wy + Math.sin(a) * cutR, -zHalf),
+        new THREE.Vector3(wx + Math.cos(a) * cutR, wy + Math.sin(a) * cutR,  zHalf),
+      ];
+      const vline = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMat);
+      vline.renderOrder = 501;
+      scene.add(vline);
+      tireCylinderMeshes.push(vline);
+    }
+  };
+
+  // オリジナル座標（スケール前）で表示
+  if (wheels.front) addCyl(wheels.front.x, wheels.front.y);
+  if (wheels.rear)  addCyl(wheels.rear.x,  wheels.rear.y);
+}
+
+function removeTireCylinders() {
+  tireCylinderMeshes.forEach(m => {
+    scene.remove(m);
+    m.geometry.dispose();
+    if (m.material) m.material.dispose();
+  });
+  tireCylinderMeshes = [];
+}
 
 // ── Three.js ───────────────────────────────────────────────────
 function initThree() {
@@ -662,7 +778,7 @@ function rotateModel(axis,deg) {
   wheels.front=null; wheels.rear=null;
   removeMarker('front'); removeMarker('rear');
   updateWheelUI();
-  scaledGeo=null;
+  scaledGeo=null; appliedScales=null;
   if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
   document.getElementById('shellResetBtn').style.display='none';
   document.getElementById('dlBtn').disabled=true;
@@ -892,6 +1008,7 @@ function updatePreview() {
 // ── Apply ──────────────────────────────────────────────────────
 document.getElementById('applyBtn').addEventListener('click',()=>{
   const sc=getScales(); if(!sc) return;
+  appliedScales = sc;
   scaledGeo=currentGeo.clone();
   scaledGeo.applyMatrix4(new THREE.Matrix4().makeScale(sc.sx,sc.sy,sc.sz));
   scaledGeo.computeBoundingBox(); scaledGeo.computeVertexNormals();
@@ -919,6 +1036,7 @@ document.getElementById('applyBtn').addEventListener('click',()=>{
   document.getElementById('sizeY').textContent=s.y.toFixed(1)+' mm ✓';
   document.getElementById('sizeZ').textContent=s.z.toFixed(1)+' mm ✓';
   setMsg('✓ スケール適用完了 — 半透明=元モデル / 緑=スケール後');
+  buildTireCylinders();  // オリジナル座標の円筒可視化を更新（スケール前モデルに対応）
   if (document.getElementById('boxCheck').checked) { applyDefaultBoxSize(); buildInteriorBox(); }
 });
 
@@ -950,10 +1068,11 @@ document.getElementById('dlBtn').addEventListener('click',()=>{
 
 // ── Reset ──────────────────────────────────────────────────────
 document.getElementById('resetBtn').addEventListener('click',()=>{
-  wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null;
+  wheels.front=null; wheels.rear=null; pickMode=null; activeAdj=null; scaledGeo=null; appliedScales=null;
   if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
   document.getElementById('shellResetBtn').style.display='none';
   removeMarker('front'); removeMarker('rear');
+  removeTireCylinders();
   removeInteriorBox();
   document.getElementById('boxCheck').checked = false;
   document.getElementById('boxControls').style.display = 'none';
@@ -1033,8 +1152,10 @@ function getBoxCenter() {
   // ホイールベース線の中心: 前後輪X中点、Y=タイヤ半径、Z=0
   const activeMesh = scaledMesh || mainMesh;
   if (wheels.front && wheels.rear) {
-    const mx = (wheels.front.x + wheels.rear.x) / 2;
-    const my = wheels.front.y; // タイヤ中心Y
+    // スケール適用済みの場合、ホイール座標を倍率で補正する
+    const sc = appliedScales || { sx: 1, sy: 1, sz: 1 };
+    const mx = (wheels.front.x + wheels.rear.x) / 2 * sc.sx;
+    const my = wheels.front.y * sc.sy; // タイヤ中心Y
     return new THREE.Vector3(mx, my, 0);
   }
   // ホイール未指定時はモデルBBの中心
@@ -1109,6 +1230,131 @@ function weldGeo(srcGeo) {
   return { uniqueVerts, faces };
 }
 
+// ── Mesh Repair ────────────────────────────────────────────────
+
+// Step1: ゼロ面積・重複面の除去
+function removeDegenerate(verts, faces) {
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _cr = new THREE.Vector3();
+  const seen = new Set();
+  return faces.filter(([a, b, c]) => {
+    if (a === b || b === c || a === c) return false;
+    _e1.subVectors(verts[b], verts[a]);
+    _e2.subVectors(verts[c], verts[a]);
+    _cr.crossVectors(_e1, _e2);
+    if (_cr.lengthSq() < 1e-12) return false;
+    const key = [a, b, c].sort((x, y) => x - y).join('_');
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+// Step2: 法線の向きを統一（BFS で巻き順を伝播、多数決で外向きに揃える）
+function unifyNormals(verts, faces) {
+  const n = faces.length;
+  if (n === 0) return faces;
+
+  // 無向エッジ → [{fi, p, q}] のマップを構築
+  const edgeMap = new Map();
+  for (let i = 0; i < n; i++) {
+    const [a, b, c] = faces[i];
+    for (const [p, q] of [[a,b],[b,c],[c,a]]) {
+      const key = p < q ? `${p}_${q}` : `${q}_${p}`;
+      if (!edgeMap.has(key)) edgeMap.set(key, []);
+      edgeMap.get(key).push({ fi: i, p, q });
+    }
+  }
+
+  // 面ごとの隣接リスト（flip が必要かどうかの情報付き）
+  const adj = Array.from({ length: n }, () => []);
+  for (const entries of edgeMap.values()) {
+    if (entries.length !== 2) continue; // 境界 or 非多様体は飛ばす
+    const [e0, e1] = entries;
+    const consistent = (e0.p === e1.q && e0.q === e1.p); // 逆向き = 整合
+    adj[e0.fi].push({ ni: e1.fi, flip: !consistent });
+    adj[e1.fi].push({ ni: e0.fi, flip: !consistent });
+  }
+
+  // BFS で巻き順を伝播
+  const flipped = new Uint8Array(n);
+  const visited = new Uint8Array(n);
+  for (let start = 0; start < n; start++) {
+    if (visited[start]) continue;
+    visited[start] = 1;
+    const queue = [start];
+    while (queue.length) {
+      const fi = queue.shift();
+      for (const { ni, flip } of adj[fi]) {
+        if (!visited[ni]) {
+          visited[ni] = 1;
+          flipped[ni] = flipped[fi] ^ (flip ? 1 : 0);
+          queue.push(ni);
+        }
+      }
+    }
+  }
+
+  const result = faces.map((f, i) => flipped[i] ? [f[0], f[2], f[1]] : f);
+
+  // 多数決: 重心から見て外向きの面が多数派になるよう全体を反転
+  const centroid = new THREE.Vector3();
+  verts.forEach(v => centroid.add(v));
+  centroid.divideScalar(verts.length);
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3();
+  let outward = 0;
+  for (const [a, b, c] of result) {
+    _e1.subVectors(verts[b], verts[a]);
+    _e2.subVectors(verts[c], verts[a]);
+    const fc = verts[a].clone().add(verts[b]).add(verts[c]).divideScalar(3).sub(centroid);
+    if (new THREE.Vector3().crossVectors(_e1, _e2).dot(fc) > 0) outward++;
+  }
+  if (outward < result.length / 2) return result.map(([a, b, c]) => [a, c, b]);
+  return result;
+}
+
+// Step3: 境界エッジループを検出してファン三角分割で穴埋め
+function fillHoles(verts, faces) {
+  const dirEdge = new Set();
+  for (const [a, b, c] of faces) {
+    dirEdge.add(`${a}_${b}`); dirEdge.add(`${b}_${c}`); dirEdge.add(`${c}_${a}`);
+  }
+
+  // 境界エッジ: a→b は存在するが b→a がないもの
+  const nextVert = new Map();
+  for (const key of dirEdge) {
+    const [a, b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) nextVert.set(a, b);
+  }
+  if (nextVert.size === 0) return faces;
+
+  // ループを辿る
+  const visited = new Set();
+  const result = [...faces];
+  for (const [startV] of nextVert) {
+    if (visited.has(startV)) continue;
+    const loop = [];
+    let cur = startV;
+    while (cur !== undefined && !visited.has(cur)) {
+      visited.add(cur); loop.push(cur); cur = nextVert.get(cur);
+      if (cur === startV) break;
+    }
+    if (loop.length < 3) continue;
+    // ファン三角分割（境界の逆巻きで外向き法線を保持）
+    for (let i = 1; i < loop.length - 1; i++) {
+      result.push([loop[0], loop[i + 1], loop[i]]);
+    }
+  }
+  return result;
+}
+
+// 3ステップをまとめて実行
+function repairMesh(verts, faces) {
+  let f = removeDegenerate(verts, faces);
+  f = unifyNormals(verts, f);
+  f = fillHoles(verts, f);
+  return f;
+}
+
 // ラプラシアンスムージング: 頂点座標を隣接頂点の平均に置き換えて抽象化メッシュを生成
 function laplacianSmooth(uniqueVerts, faces, iterations) {
   if (iterations <= 0) return uniqueVerts;
@@ -1134,6 +1380,110 @@ function laplacianSmooth(uniqueVerts, faces, iterations) {
   return pos;
 }
 
+// ── SDF補正オフセット用ヘルパー ──────────────────────────────────────────────
+
+// 点Pから三角形ABCへの最近距離（スカラー最適化版）
+function ptTriDist(Px,Py,Pz, Ax,Ay,Az, Bx,By,Bz, Cx,Cy,Cz) {
+  const ABx=Bx-Ax,ABy=By-Ay,ABz=Bz-Az;
+  const ACx=Cx-Ax,ACy=Cy-Ay,ACz=Cz-Az;
+  const APx=Px-Ax,APy=Py-Ay,APz=Pz-Az;
+  const d1=ABx*APx+ABy*APy+ABz*APz, d2=ACx*APx+ACy*APy+ACz*APz;
+  if(d1<=0&&d2<=0){const dx=Px-Ax,dy=Py-Ay,dz=Pz-Az;return Math.sqrt(dx*dx+dy*dy+dz*dz);}
+  const BPx=Px-Bx,BPy=Py-By,BPz=Pz-Bz;
+  const d3=ABx*BPx+ABy*BPy+ABz*BPz, d4=ACx*BPx+ACy*BPy+ACz*BPz;
+  if(d3>=0&&d4<=d3){const dx=Px-Bx,dy=Py-By,dz=Pz-Bz;return Math.sqrt(dx*dx+dy*dy+dz*dz);}
+  const CPx=Px-Cx,CPy=Py-Cy,CPz=Pz-Cz;
+  const d5=ABx*CPx+ABy*CPy+ABz*CPz, d6=ACx*CPx+ACy*CPy+ACz*CPz;
+  if(d6>=0&&d5<=d6){const dx=Px-Cx,dy=Py-Cy,dz=Pz-Cz;return Math.sqrt(dx*dx+dy*dy+dz*dz);}
+  const vc=d1*d4-d3*d2;
+  if(vc<=0&&d1>=0&&d3<=0){const t=d1/(d1-d3);const qx=Ax+ABx*t,qy=Ay+ABy*t,qz=Az+ABz*t;const dx=Px-qx,dy=Py-qy,dz=Pz-qz;return Math.sqrt(dx*dx+dy*dy+dz*dz);}
+  const vb=d5*d2-d1*d6;
+  if(vb<=0&&d2>=0&&d6<=0){const t=d2/(d2-d6);const qx=Ax+ACx*t,qy=Ay+ACy*t,qz=Az+ACz*t;const dx=Px-qx,dy=Py-qy,dz=Pz-qz;return Math.sqrt(dx*dx+dy*dy+dz*dz);}
+  const va=d3*d6-d5*d4;
+  if(va<=0&&(d4-d3)>=0&&(d5-d6)>=0){const t=(d4-d3)/((d4-d3)+(d5-d6));const qx=Bx+(Cx-Bx)*t,qy=By+(Cy-By)*t,qz=Bz+(Cz-Bz)*t;const dx=Px-qx,dy=Py-qy,dz=Pz-qz;return Math.sqrt(dx*dx+dy*dy+dz*dz);}
+  const inv=1/(va+vb+vc),v=vb*inv,w=vc*inv;
+  const qx=Ax+ABx*v+ACx*w,qy=Ay+ABy*v+ACy*w,qz=Az+ABz*v+ACz*w;
+  const dx=Px-qx,dy=Py-qy,dz=Pz-qz;return Math.sqrt(dx*dx+dy*dy+dz*dz);
+}
+
+// 三角形を空間グリッドに登録して近隣三角形を高速検索できる構造を作る
+function buildSpatialGrid(verts, faces, cellSize) {
+  let mnx=Infinity,mny=Infinity,mnz=Infinity;
+  for(const v of verts){if(v.x<mnx)mnx=v.x;if(v.y<mny)mny=v.y;if(v.z<mnz)mnz=v.z;}
+  const grid=new Map();
+  for(let fi=0;fi<faces.length;fi++){
+    const[a,b,c]=faces[fi]; const vA=verts[a],vB=verts[b],vC=verts[c];
+    const x0=Math.min(vA.x,vB.x,vC.x),y0=Math.min(vA.y,vB.y,vC.y),z0=Math.min(vA.z,vB.z,vC.z);
+    const x1=Math.max(vA.x,vB.x,vC.x),y1=Math.max(vA.y,vB.y,vC.y),z1=Math.max(vA.z,vB.z,vC.z);
+    const ix0=Math.floor((x0-mnx)/cellSize),iy0=Math.floor((y0-mny)/cellSize),iz0=Math.floor((z0-mnz)/cellSize);
+    const ix1=Math.floor((x1-mnx)/cellSize),iy1=Math.floor((y1-mny)/cellSize),iz1=Math.floor((z1-mnz)/cellSize);
+    for(let ix=ix0;ix<=ix1;ix++)for(let iy=iy0;iy<=iy1;iy++)for(let iz=iz0;iz<=iz1;iz++){
+      const key=`${ix},${iy},${iz}`;
+      if(!grid.has(key))grid.set(key,[]);
+      grid.get(key).push(fi);
+    }
+  }
+  return {grid, min:{x:mnx,y:mny,z:mnz}, cellSize};
+}
+
+// 点(Px,Py,Pz)から最近三角形への距離をグリッドで高速検索
+function queryMinDist(Px,Py,Pz, verts,faces,sg,r) {
+  const{grid,min,cellSize}=sg;
+  const cx=Math.floor((Px-min.x)/cellSize),cy=Math.floor((Py-min.y)/cellSize),cz=Math.floor((Pz-min.z)/cellSize);
+  let best=Infinity;
+  for(let ix=cx-r;ix<=cx+r;ix++)for(let iy=cy-r;iy<=cy+r;iy++)for(let iz=cz-r;iz<=cz+r;iz++){
+    const fis=grid.get(`${ix},${iy},${iz}`);
+    if(!fis)continue;
+    for(const fi of fis){
+      const[a,b,c]=faces[fi];
+      const d=ptTriDist(Px,Py,Pz,verts[a].x,verts[a].y,verts[a].z,verts[b].x,verts[b].y,verts[b].z,verts[c].x,verts[c].y,verts[c].z);
+      if(d<best)best=d;
+    }
+  }
+  return best<Infinity?best:0;
+}
+
+// 点Pから三角形ABCへの最近接点の座標を返す（Plan B 等距離補正用）
+function closestPtOnTri(Px,Py,Pz, Ax,Ay,Az, Bx,By,Bz, Cx,Cy,Cz) {
+  const ABx=Bx-Ax,ABy=By-Ay,ABz=Bz-Az;
+  const ACx=Cx-Ax,ACy=Cy-Ay,ACz=Cz-Az;
+  const APx=Px-Ax,APy=Py-Ay,APz=Pz-Az;
+  const d1=ABx*APx+ABy*APy+ABz*APz, d2=ACx*APx+ACy*APy+ACz*APz;
+  if(d1<=0&&d2<=0) return [Ax,Ay,Az];
+  const BPx=Px-Bx,BPy=Py-By,BPz=Pz-Bz;
+  const d3=ABx*BPx+ABy*BPy+ABz*BPz, d4=ACx*BPx+ACy*BPy+ACz*BPz;
+  if(d3>=0&&d4<=d3) return [Bx,By,Bz];
+  const CPx=Px-Cx,CPy=Py-Cy,CPz=Pz-Cz;
+  const d5=ABx*CPx+ABy*CPy+ABz*CPz, d6=ACx*CPx+ACy*CPy+ACz*CPz;
+  if(d6>=0&&d5<=d6) return [Cx,Cy,Cz];
+  const vc=d1*d4-d3*d2;
+  if(vc<=0&&d1>=0&&d3<=0){const t=d1/(d1-d3);return[Ax+ABx*t,Ay+ABy*t,Az+ABz*t];}
+  const vb=d5*d2-d1*d6;
+  if(vb<=0&&d2>=0&&d6<=0){const t=d2/(d2-d6);return[Ax+ACx*t,Ay+ACy*t,Az+ACz*t];}
+  const va=d3*d6-d5*d4;
+  if(va<=0&&(d4-d3)>=0&&(d5-d6)>=0){const t=(d4-d3)/((d4-d3)+(d5-d6));return[Bx+(Cx-Bx)*t,By+(Cy-By)*t,Bz+(Cz-Bz)*t];}
+  const inv=1/(va+vb+vc),v=vb*inv,w=vc*inv;
+  return[Ax+ABx*v+ACx*w,Ay+ABy*v+ACy*w,Az+ABz*v+ACz*w];
+}
+
+// 点(Px,Py,Pz)から最近三角形への最近接点と距離をグリッドで検索
+function queryNearestPt(Px,Py,Pz, verts,faces,sg,r) {
+  const{grid,min,cellSize}=sg;
+  const cx=Math.floor((Px-min.x)/cellSize),cy=Math.floor((Py-min.y)/cellSize),cz=Math.floor((Pz-min.z)/cellSize);
+  let bestD=Infinity, bestQx=Px, bestQy=Py, bestQz=Pz;
+  for(let ix=cx-r;ix<=cx+r;ix++)for(let iy=cy-r;iy<=cy+r;iy++)for(let iz=cz-r;iz<=cz+r;iz++){
+    const fis=grid.get(`${ix},${iy},${iz}`);
+    if(!fis)continue;
+    for(const fi of fis){
+      const[a,b,c]=faces[fi];
+      const[qx,qy,qz]=closestPtOnTri(Px,Py,Pz,verts[a].x,verts[a].y,verts[a].z,verts[b].x,verts[b].y,verts[b].z,verts[c].x,verts[c].y,verts[c].z);
+      const dx=Px-qx,dy=Py-qy,dz=Pz-qz; const d=Math.sqrt(dx*dx+dy*dy+dz*dz);
+      if(d<bestD){bestD=d;bestQx=qx;bestQy=qy;bestQz=qz;}
+    }
+  }
+  return{dist:bestD,qx:bestQx,qy:bestQy,qz:bestQz};
+}
+
 // normVerts: 法線計算に使う頂点座標（省略時は uniqueVerts をそのまま使用）
 function buildShellGeo(uniqueVerts, faces, thickness, normVerts) {
   // normVerts が指定されている場合はその抽象化メッシュの法線でオフセット方向を決定
@@ -1149,6 +1499,35 @@ function buildShellGeo(uniqueVerts, faces, thickness, normVerts) {
     vertNormals[a].add(_cr); vertNormals[b].add(_cr); vertNormals[c].add(_cr);
   }
   vertNormals.forEach(n => n.normalize());
+
+  // ── 外れ値法線の検出と置換 ───────────────────────────────────
+  // 非多様体・ピンチポイントなどで近傍法線と大きく乖離した頂点法線を
+  // 近傍平均に置き換えることでスパイク状アーティファクトを抑制する
+  {
+    // 頂点隣接グラフを構築
+    const adjSets = Array.from({ length: nv.length }, () => new Set());
+    for (const [a, b, c] of faces) {
+      adjSets[a].add(b); adjSets[a].add(c);
+      adjSets[b].add(a); adjSets[b].add(c);
+      adjSets[c].add(a); adjSets[c].add(b);
+    }
+    const adj = adjSets.map(s => [...s]);
+
+    // cos(閾値角度) を下回る頂点は近傍平均法線で置き換える
+    // 閾値 0.0 = 90° 超の乖離のみ、-0.5 = 120° 超、0.3 = 72° 超
+    const OUTLIER_COS = 0.0;
+    const _avg = new THREE.Vector3();
+    for (let i = 0; i < vertNormals.length; i++) {
+      const nbrs = adj[i];
+      if (nbrs.length === 0) continue;
+      _avg.set(0, 0, 0);
+      for (const j of nbrs) _avg.add(vertNormals[j]);
+      _avg.normalize();
+      if (vertNormals[i].dot(_avg) < OUTLIER_COS) {
+        vertNormals[i].copy(_avg);
+      }
+    }
+  }
 
   // 内側頂点は元の座標位置から抽象化法線方向にオフセット
   const innerVerts = uniqueVerts.map((v,i) => v.clone().addScaledVector(vertNormals[i], -thickness));
@@ -1184,7 +1563,7 @@ function buildShellGeo(uniqueVerts, faces, thickness, normVerts) {
   return g;
 }
 
-// スケールシェル: 重心から縮小したコピーを内面に使い、境界を壁で結合
+// スケールシェル: 重心基準で縮小したコピーを内面に使い、境界を壁で結合
 // normVerts を渡すと内面の形状をスムージング済み座標で生成（抽象化）
 function buildShellGeoScale(uniqueVerts, faces, thickness, normVerts) {
   // 重心計算
@@ -1192,7 +1571,7 @@ function buildShellGeoScale(uniqueVerts, faces, thickness, normVerts) {
   uniqueVerts.forEach(v => centroid.add(v));
   centroid.divideScalar(uniqueVerts.length);
 
-  // 重心からの平均距離で縮小率を算出
+  // 重心からの平均距離でスケール率を算出
   let meanDist = 0;
   for (const v of uniqueVerts) meanDist += v.distanceTo(centroid);
   meanDist /= uniqueVerts.length;
@@ -1240,9 +1619,438 @@ function buildShellGeoScale(uniqueVerts, faces, thickness, normVerts) {
   return g;
 }
 
+// SDF補正オフセット: 各頂点をサーフェスから少し外側に変位させた点でUDF勾配を計算し
+// メッシュ法線より安定した法線ベクトルを求める
+// allFaces: 修復・溶接済み全面（グリッド構築用）、faces: フィルタ済み面（シェル構築用）
+async function buildShellGeoSDF(uniqueVerts, allFaces, faces, thickness, normVerts) {
+  // グリッドのセルサイズ: 肉厚の2倍程度（三角形が2〜3セルに収まるサイズ）
+  const CELL = Math.max(2, thickness * 2);
+  // 勾配サンプルのステップ幅 (h): 小さすぎると数値誤差、大きすぎると精度低下
+  const H = Math.max(0.3, thickness * 0.12);
+  // 事前変位量 (EPS): 頂点をサーフェスから外側に少し離してからUDF勾配を計算する
+  // EPS > H が必要（変位点のUDF値がHよりも大きくなるため）
+  const EPS = H * 3.5;
+  // グリッド検索半径 (セル数): EPS+H を CELL で割り切れる余裕を持たせる
+  const GRID_R = Math.ceil((EPS + H * 2) / CELL) + 1;
+
+  await yld('SDF: 空間グリッドを構築中...');
+  const sg = buildSpatialGrid(uniqueVerts, allFaces, CELL);
+
+  // ── Step1: 粗い法線を計算（面積重み付き頂点法線 + 外れ値置換 × 2パス）──
+  // SDF法は自前でSDF勾配から法線を求めるため、normVerts（スムージング済み座標）は
+  // 事前変位方向の計算には使わない。常に元の頂点座標を基準にする。
+  const roughNormals = uniqueVerts.map(() => new THREE.Vector3());
+  { const _e1=new THREE.Vector3(),_e2=new THREE.Vector3(),_cr=new THREE.Vector3();
+    for(const[a,b,c]of allFaces){
+      _e1.subVectors(uniqueVerts[b],uniqueVerts[a]); _e2.subVectors(uniqueVerts[c],uniqueVerts[a]); _cr.crossVectors(_e1,_e2);
+      roughNormals[a].add(_cr); roughNormals[b].add(_cr); roughNormals[c].add(_cr);
+    }
+    roughNormals.forEach(n=>n.normalize());
+  }
+  // 外れ値置換: 近傍平均と90°以上ずれた頂点法線を近傍平均で上書き（2パス）
+  { const adjSets=Array.from({length:uniqueVerts.length},()=>new Set());
+    for(const[a,b,c]of allFaces){adjSets[a].add(b);adjSets[a].add(c);adjSets[b].add(a);adjSets[b].add(c);adjSets[c].add(a);adjSets[c].add(b);}
+    const adj=adjSets.map(s=>[...s]);
+    const _avg=new THREE.Vector3();
+    for(let pass=0;pass<2;pass++){
+      for(let i=0;i<roughNormals.length;i++){
+        const nbrs=adj[i]; if(!nbrs.length)continue;
+        _avg.set(0,0,0); for(const j of nbrs)_avg.add(roughNormals[j]); _avg.normalize();
+        if(roughNormals[i].dot(_avg)<0.0) roughNormals[i].copy(_avg);
+      }
+    }
+  }
+
+  // ── Step2: 各頂点でUDF勾配を計算してSDF補正法線を求める ──────────────────
+  // アルゴリズム: 頂点V を粗い法線N方向に EPS だけ外側に変位した点P0を作り、
+  // P0での中心差分 (UDF(P0+H*ei) - UDF(P0-H*ei)) / (2H) から勾配を計算。
+  // P0はサーフェス外にある点なのでUDF勾配 ≈ そのサーフェス点での外向き法線。
+  await yld('SDF: 頂点法線を精密化中...');
+  const sdfNormals = new Array(uniqueVerts.length);
+  const CHUNK = 250;
+  for(let vi=0;vi<uniqueVerts.length;vi+=CHUNK){
+    const end=Math.min(vi+CHUNK,uniqueVerts.length);
+    for(let i=vi;i<end;i++){
+      const V=uniqueVerts[i], N=roughNormals[i];
+      // 粗い法線方向に EPS だけ変位した点 P0（サーフェス外を狙う）
+      const P0x=V.x+EPS*N.x, P0y=V.y+EPS*N.y, P0z=V.z+EPS*N.z;
+      // 6方向の中心差分でUDF勾配を近似
+      const dxp=queryMinDist(P0x+H,P0y,P0z, uniqueVerts,allFaces,sg,GRID_R);
+      const dxn=queryMinDist(P0x-H,P0y,P0z, uniqueVerts,allFaces,sg,GRID_R);
+      const dyp=queryMinDist(P0x,P0y+H,P0z, uniqueVerts,allFaces,sg,GRID_R);
+      const dyn=queryMinDist(P0x,P0y-H,P0z, uniqueVerts,allFaces,sg,GRID_R);
+      const dzp=queryMinDist(P0x,P0y,P0z+H, uniqueVerts,allFaces,sg,GRID_R);
+      const dzn=queryMinDist(P0x,P0y,P0z-H, uniqueVerts,allFaces,sg,GRID_R);
+      let gx=dxp-dxn, gy=dyp-dyn, gz=dzp-dzn;
+      const len=Math.sqrt(gx*gx+gy*gy+gz*gz);
+      if(len>0.01){
+        gx/=len; gy/=len; gz/=len;
+        // 粗い法線と逆向きなら反転（P0が内側に入った場合の補正）
+        if(gx*N.x+gy*N.y+gz*N.z<0){gx=-gx;gy=-gy;gz=-gz;}
+        sdfNormals[i]=new THREE.Vector3(gx,gy,gz);
+      } else {
+        sdfNormals[i]=N;  // UDF勾配が計算できない場合は粗い法線にフォールバック
+      }
+    }
+    const pct=Math.round(end/uniqueVerts.length*100);
+    await yld(`SDF: ${end.toLocaleString()} / ${uniqueVerts.length.toLocaleString()} 頂点 (${pct}%)`);
+  }
+
+  // ── Step3: SDF補正法線で内面頂点を生成 ──────────────────────────────────
+  // normVerts（スムージング済み座標）が指定されている場合は内面の基点として使用する
+  // 法線方向はSDFから計算したものを使うが、オフセット元座標はスムージング版にする
+  const innerBase = normVerts || uniqueVerts;
+  const innerVerts=innerBase.map((v,i)=>v.clone().addScaledVector(sdfNormals[i],-thickness));
+
+  // 境界エッジ検出（フィルタ済み faces から）
+  const dirEdge=new Map();
+  for(const[a,b,c]of faces)for(const[p,q]of[[a,b],[b,c],[c,a]])dirEdge.set(`${p}_${q}`,true);
+  const boundaryEdges=[];
+  for(const[key]of dirEdge){const[a,b]=key.split('_').map(Number);if(!dirEdge.has(`${b}_${a}`))boundaryEdges.push([a,b]);}
+
+  const positions=[],normals=[];
+  function addTri(p0,p1,p2){
+    const e1=new THREE.Vector3().subVectors(p1,p0),e2=new THREE.Vector3().subVectors(p2,p0);
+    const n=new THREE.Vector3().crossVectors(e1,e2).normalize();
+    for(const p of[p0,p1,p2]){positions.push(p.x,p.y,p.z);normals.push(n.x,n.y,n.z);}
+  }
+  for(const[a,b,c]of faces)addTri(uniqueVerts[a],uniqueVerts[b],uniqueVerts[c]);
+  for(const[a,b,c]of faces)addTri(innerVerts[a],innerVerts[c],innerVerts[b]);
+  for(const[a,b]of boundaryEdges){
+    addTri(uniqueVerts[a],uniqueVerts[b],innerVerts[b]);
+    addTri(uniqueVerts[a],innerVerts[b],innerVerts[a]);
+  }
+
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(new Float32Array(positions),3));
+  g.setAttribute('normal',new THREE.BufferAttribute(new Float32Array(normals),3));
+  g.computeBoundingBox();
+  return g;
+}
+
+// Plan B: シュリンクラップ等距離補正
+// 法線を一切使わず、外面への最近接点投影で内面頂点をちょうど thickness の位置に収束させる。
+// スパイク完全回避。normVerts（スムージング済み）を初期形状のベースに使うと
+// 抽象化された内面形状から補正を開始できる。
+async function buildShellGeoPlanB(uniqueVerts, allFaces, faces, thickness, normVerts) {
+  const CELL = Math.max(2, thickness * 2);
+  // 内面頂点は外面から thickness 離れているので、グリッド検索半径は thickness を余裕を持ってカバーする量
+  const GRID_R = Math.ceil(thickness * 2.5 / CELL) + 1;
+  const ICP_ITER = 8;
+
+  // 初期内面: スケールシェルと同じ重心基準縮小で spike-free なスタート地点を作る
+  const centroid = new THREE.Vector3();
+  uniqueVerts.forEach(v => centroid.add(v));
+  centroid.divideScalar(uniqueVerts.length);
+  let meanDist = 0;
+  for (const v of uniqueVerts) meanDist += v.distanceTo(centroid);
+  meanDist /= uniqueVerts.length;
+  const scale = Math.max(0.01, 1 - thickness / meanDist);
+
+  // normVerts（スムージング済み）があればそちらを内面初期形状のベースにする
+  const srcVerts = normVerts || uniqueVerts;
+  let inner = srcVerts.map(v => centroid.clone().add(v.clone().sub(centroid).multiplyScalar(scale)));
+
+  // 空間グリッド構築
+  await yld('Plan B: 空間グリッドを構築中...');
+  const sg = buildSpatialGrid(uniqueVerts, allFaces, CELL);
+
+  // ICP ループ: 各内面頂点を「外面上の最近接点 + thickness の位置」に投影
+  // 1 回でほぼ収束するが、最近接点が移動後に変わりうるため数回繰り返す
+  for (let iter = 0; iter < ICP_ITER; iter++) {
+    const newInner = [];
+    const CHUNK = 400;
+    for (let vi = 0; vi < inner.length; vi += CHUNK) {
+      const end = Math.min(vi + CHUNK, inner.length);
+      for (let i = vi; i < end; i++) {
+        const iv = inner[i];
+        const {dist, qx, qy, qz} = queryNearestPt(iv.x, iv.y, iv.z, uniqueVerts, allFaces, sg, GRID_R);
+        if (dist < 0.001) { newInner.push(iv); continue; }
+        // 最近接点 Q から thickness だけ離れた位置に投影
+        const s = thickness / dist;
+        newInner.push(new THREE.Vector3(
+          qx + (iv.x - qx) * s,
+          qy + (iv.y - qy) * s,
+          qz + (iv.z - qz) * s
+        ));
+      }
+      await yld(`Plan B: 補正 ${iter+1}/${ICP_ITER} — ${Math.min(end,inner.length).toLocaleString()} / ${inner.length.toLocaleString()} 頂点`);
+    }
+    inner = newInner;
+  }
+
+  // 境界エッジ検出
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces) for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  const boundaryEdges = [];
+  for (const [key] of dirEdge) { const [a,b] = key.split('_').map(Number); if (!dirEdge.has(`${b}_${a}`)) boundaryEdges.push([a,b]); }
+
+  const positions = [], normals = [];
+  function addTri(p0,p1,p2) {
+    const e1=new THREE.Vector3().subVectors(p1,p0),e2=new THREE.Vector3().subVectors(p2,p0);
+    const n=new THREE.Vector3().crossVectors(e1,e2).normalize();
+    for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
+  }
+  for (const [a,b,c] of faces) addTri(uniqueVerts[a],uniqueVerts[b],uniqueVerts[c]);
+  for (const [a,b,c] of faces) addTri(inner[a],inner[c],inner[b]);
+  for (const [a,b] of boundaryEdges) {
+    addTri(uniqueVerts[a],uniqueVerts[b],inner[b]);
+    addTri(uniqueVerts[a],inner[b],inner[a]);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  g.computeBoundingBox();
+  return g;
+}
+
+// タイヤ穴くり抜き: 前輪・後輪それぞれ Z 方向全貫通シリンダーで面を除去する。
+// 車は左右対称なので 1 本のシリンダーが左右タイヤ両方をまとめてくり抜く。
+// tireDefs: [{ wx, wy, r2 }, ...]
+//   wx, wy : 車軸中心 X,Y（スケール済み座標）
+//   r2     : (タイヤ半径 + クリアランス)²
+// 頂点カラー属性がある場合はそのまま引き継ぐ。
+function cutTireFaces(geo, tireDefs) {
+  const pos = geo.attributes.position.array;
+  const nor = geo.attributes.normal.array;
+  const col = geo.attributes.color ? geo.attributes.color.array : null;
+  const newPos = [], newNor = [], newCol = [];
+
+  for (let i = 0; i < pos.length; i += 9) {
+    // 面の重心（Z は不問 — シリンダーが全幅を貫通）
+    const cx = (pos[i]   + pos[i+3] + pos[i+6]) / 3;
+    const cy = (pos[i+1] + pos[i+4] + pos[i+7]) / 3;
+
+    let cut = false;
+    for (const t of tireDefs) {
+      const dx = cx - t.wx, dy = cy - t.wy;
+      if (dx*dx + dy*dy < t.r2) { cut = true; break; }
+    }
+
+    if (!cut) {
+      for (let j = 0; j < 9; j++) { newPos.push(pos[i+j]); newNor.push(nor[i+j]); }
+      if (col) for (let j = 0; j < 9; j++) newCol.push(col[i+j]);
+    }
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(newNor), 3));
+  if (col && newCol.length) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(newCol), 3));
+  g.computeBoundingBox();
+  return g;
+}
+
+// クローズドホロー法: 閉じたソリッドメッシュ（AI生成モデル等）を中空シェルに変換する。
+// 境界エッジが存在しないため壁ストリップは一切不要 → スライサーが壁2枚だけを認識するクリーンな出力。
+// withColors=true のとき 外面=シアン / 内面=グリーン で頂点カラーを付与。
+// 境界エッジが検出された場合は警告を返す（処理は継続）。
+function buildShellGeoHollow(uniqueVerts, faces, thickness, normVerts, withColors) {
+  const nv = normVerts || uniqueVerts;
+
+  // 面積加重頂点法線
+  const vertNormals = nv.map(() => new THREE.Vector3());
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _cr = new THREE.Vector3();
+  for (const [a,b,c] of faces) {
+    _e1.subVectors(nv[b], nv[a]); _e2.subVectors(nv[c], nv[a]); _cr.crossVectors(_e1, _e2);
+    vertNormals[a].add(_cr); vertNormals[b].add(_cr); vertNormals[c].add(_cr);
+  }
+  vertNormals.forEach(n => n.normalize());
+
+  // 外れ値法線補正
+  {
+    const adjSets = Array.from({length: nv.length}, () => new Set());
+    for (const [a,b,c] of faces) {
+      adjSets[a].add(b); adjSets[a].add(c);
+      adjSets[b].add(a); adjSets[b].add(c);
+      adjSets[c].add(a); adjSets[c].add(b);
+    }
+    const adj = adjSets.map(s => [...s]);
+    const _avg = new THREE.Vector3();
+    for (let i = 0; i < vertNormals.length; i++) {
+      const nbrs = adj[i]; if (!nbrs.length) continue;
+      _avg.set(0,0,0); for (const j of nbrs) _avg.add(vertNormals[j]); _avg.normalize();
+      if (vertNormals[i].dot(_avg) < 0.0) vertNormals[i].copy(_avg);
+    }
+  }
+
+  // 境界エッジ検出（閉じたソリッドなら0本のはず）
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces)
+    for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  let boundaryCount = 0;
+  for (const [key] of dirEdge) {
+    const [a,b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) boundaryCount++;
+  }
+
+  // 内面頂点（法線逆方向にオフセット）
+  const innerVerts = uniqueVerts.map((v,i) => v.clone().addScaledVector(vertNormals[i], -thickness));
+
+  const positions = [], normals = [], colors = [];
+  const COL_OUTER = [0.05, 0.85, 1.00];  // シアン ─ 外面
+  const COL_INNER = [0.22, 0.83, 0.33];  // グリーン ─ 内面
+
+  function addTri(p0, p1, p2, col) {
+    const e1 = new THREE.Vector3().subVectors(p1, p0);
+    const e2 = new THREE.Vector3().subVectors(p2, p0);
+    const n  = new THREE.Vector3().crossVectors(e1, e2).normalize();
+    for (const p of [p0,p1,p2]) {
+      positions.push(p.x, p.y, p.z);
+      normals.push(n.x, n.y, n.z);
+      if (withColors) colors.push(col[0], col[1], col[2]);
+    }
+  }
+
+  // 外面（元の形状）
+  for (const [a,b,c] of faces) addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c], COL_OUTER);
+  // 内面（逆巻き）── 壁ストリップなし
+  for (const [a,b,c] of faces) addTri(innerVerts[a], innerVerts[c], innerVerts[b], COL_INNER);
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  if (withColors && colors.length)
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  g.computeBoundingBox();
+  g._boundaryCount = boundaryCount;  // 呼び出し元で警告表示に使用
+  return g;
+}
+
+// ソリッドキャップ法: 境界頂点の内側Yを外側と同じ高さにクランプし、
+// 水平な底面リングで外面と内面を接続することでスライサーの二層誤検知を解消する。
+// withColors=true のとき各部位に頂点カラーを付与: 外面=シアン / 内面=グリーン / 底面リング=オレンジ
+function buildShellGeoSolidCap(uniqueVerts, faces, thickness, normVerts, withColors) {
+  const nv = normVerts || uniqueVerts;
+
+  // 面積加重頂点法線
+  const vertNormals = nv.map(() => new THREE.Vector3());
+  const _e1 = new THREE.Vector3(), _e2 = new THREE.Vector3(), _cr = new THREE.Vector3();
+  for (const [a,b,c] of faces) {
+    _e1.subVectors(nv[b], nv[a]); _e2.subVectors(nv[c], nv[a]); _cr.crossVectors(_e1, _e2);
+    vertNormals[a].add(_cr); vertNormals[b].add(_cr); vertNormals[c].add(_cr);
+  }
+  vertNormals.forEach(n => n.normalize());
+
+  // 外れ値法線補正（近傍平均で上書き）
+  {
+    const adjSets = Array.from({length: nv.length}, () => new Set());
+    for (const [a,b,c] of faces) {
+      adjSets[a].add(b); adjSets[a].add(c);
+      adjSets[b].add(a); adjSets[b].add(c);
+      adjSets[c].add(a); adjSets[c].add(b);
+    }
+    const adj = adjSets.map(s => [...s]);
+    const _avg = new THREE.Vector3();
+    for (let i = 0; i < vertNormals.length; i++) {
+      const nbrs = adj[i]; if (!nbrs.length) continue;
+      _avg.set(0,0,0); for (const j of nbrs) _avg.add(vertNormals[j]); _avg.normalize();
+      if (vertNormals[i].dot(_avg) < 0.0) vertNormals[i].copy(_avg);
+    }
+  }
+
+  // 内面頂点（法線逆方向にオフセット）
+  const innerVerts = uniqueVerts.map((v,i) => v.clone().addScaledVector(vertNormals[i], -thickness));
+
+  // 境界ループ検出
+  const dirEdge = new Map();
+  for (const [a,b,c] of faces)
+    for (const [p,q] of [[a,b],[b,c],[c,a]]) dirEdge.set(`${p}_${q}`, true);
+  const boundaryNext = new Map();
+  for (const [key] of dirEdge) {
+    const [a,b] = key.split('_').map(Number);
+    if (!dirEdge.has(`${b}_${a}`)) boundaryNext.set(a, b);
+  }
+  const visited = new Set();
+  const loops = [];
+  for (const start of boundaryNext.keys()) {
+    if (visited.has(start)) continue;
+    const loop = []; let cur = start, safety = 0;
+    while (!visited.has(cur) && boundaryNext.has(cur) && safety++ < 200000) {
+      visited.add(cur); loop.push(cur); cur = boundaryNext.get(cur);
+    }
+    if (loop.length >= 3) loops.push(loop);
+  }
+
+  // 境界頂点の内側Y を外側と同一にクランプ → 底面リングが水平になる
+  // （現行の斜め壁ストリップを水平リングに置き換えることでスライサーの二層誤検知を解消）
+  const boundarySet = new Set();
+  for (const loop of loops) for (const i of loop) boundarySet.add(i);
+  const floorInner = innerVerts.map((v, i) =>
+    boundarySet.has(i) ? new THREE.Vector3(v.x, uniqueVerts[i].y, v.z) : v
+  );
+
+  const positions = [], normals = [], colors = [];
+
+  // 部位カラー定数 (RGB 0-1)
+  const COL_OUTER = [0.05, 0.85, 1.00];   // シアン  ─ 外面
+  const COL_INNER = [0.22, 0.83, 0.33];   // グリーン ─ 内面
+  const COL_RING  = [1.00, 0.55, 0.10];   // オレンジ ─ 底面リング
+
+  function addTri(p0, p1, p2, col) {
+    const e1 = new THREE.Vector3().subVectors(p1, p0);
+    const e2 = new THREE.Vector3().subVectors(p2, p0);
+    const n  = new THREE.Vector3().crossVectors(e1, e2).normalize();
+    for (const p of [p0,p1,p2]) {
+      positions.push(p.x, p.y, p.z);
+      normals.push(n.x, n.y, n.z);
+      if (withColors) colors.push(col[0], col[1], col[2]);
+    }
+  }
+
+  // 外面
+  for (const [a,b,c] of faces)
+    addTri(uniqueVerts[a], uniqueVerts[b], uniqueVerts[c], COL_OUTER);
+
+  // 内面（逆巻き、floorInner 使用 = 境界でYクランプ済み）
+  for (const [a,b,c] of faces)
+    addTri(floorInner[a], floorInner[c], floorInner[b], COL_INNER);
+
+  // 底面リング: 外側境界 ↔ 内側境界 を水平クワッドで接続
+  // 現行の斜め壁ストリップと異なり、外・内が同一Y のため水平面になる
+  for (const loop of loops) {
+    for (let i = 0; i < loop.length; i++) {
+      const a = loop[i], b = loop[(i+1) % loop.length];
+      addTri(uniqueVerts[a], uniqueVerts[b], floorInner[b], COL_RING);
+      addTri(uniqueVerts[a], floorInner[b],  floorInner[a], COL_RING);
+    }
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  if (withColors && colors.length)
+    g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
+  g.computeBoundingBox();
+  return g;
+}
+
 async function applyShell() {
-  const src = scaledGeo || currentGeo;
-  if (!src) return;
+  if (!currentGeo && !scaledGeo) return;
+
+  // ── タイヤ穴くり抜き（スケール前のオリジナル座標で処理）──────
+  // currentGeo に対してカット → スケール適用 → src として使用
+  let src;
+  if (document.getElementById('shellCutTire').checked && wheels.front && wheels.rear && currentGeo) {
+    const tireR     = parseFloat(document.getElementById('tireR').value)         || 30;
+    const clearance = parseFloat(document.getElementById('tireClearance').value) || 2;
+    const r2 = (tireR + clearance) * (tireR + clearance);
+    await yld('タイヤ穴をくり抜き中（スケール前）...');
+    let cutGeo = cutTireFaces(currentGeo, [
+      { wx: wheels.front.x, wy: wheels.front.y, r2 },
+      { wx: wheels.rear.x,  wy: wheels.rear.y,  r2 },
+    ]);
+    if (appliedScales) {
+      const { sx, sy, sz } = appliedScales;
+      cutGeo.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz));
+      cutGeo.computeBoundingBox();
+      cutGeo.computeVertexNormals();
+    }
+    src = cutGeo;
+  } else {
+    src = scaledGeo || currentGeo;
+  }
   const thk = parseFloat(document.getElementById('shellThk').value);
   if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
   const method     = document.getElementById('shellMethod').value;
@@ -1252,7 +2060,20 @@ async function applyShell() {
   document.getElementById('shellBtn').disabled = true;
   await yld('頂点を統合中...');
 
-  const { uniqueVerts, faces: allFaces } = weldGeo(src);
+  let { uniqueVerts, faces: allFaces } = weldGeo(src);
+
+  // ── Mesh repair (optional) ────────────────────────────────────
+  if (document.getElementById('shellRepair').checked) {
+    const before = allFaces.length;
+    await yld('メッシュ修復中 — 縮退除去...');
+    allFaces = removeDegenerate(uniqueVerts, allFaces);
+    await yld('メッシュ修復中 — 法線統一...');
+    allFaces = unifyNormals(uniqueVerts, allFaces);
+    await yld('メッシュ修復中 — 穴埋め...');
+    allFaces = fillHoles(uniqueVerts, allFaces);
+    await yld(`修復完了: ${before.toLocaleString()} → ${allFaces.length.toLocaleString()} 面`);
+  }
+
   const total = allFaces.length;
   let faces = allFaces;
 
@@ -1317,9 +2138,18 @@ async function applyShell() {
 
   // ── Build shell ──────────────────────────────────────────────
   await yld('シェルを構築中...');
+  const colorize = document.getElementById('shellColorize').checked;
   try {
-    if (method === 'scale') {
+    if (method === 'hollow') {
+      shellGeo = buildShellGeoHollow(uniqueVerts, faces, thk, normVerts, colorize);
+    } else if (method === 'scale') {
       shellGeo = buildShellGeoScale(uniqueVerts, faces, thk, normVerts);
+    } else if (method === 'sdf') {
+      shellGeo = await buildShellGeoSDF(uniqueVerts, allFaces, faces, thk, normVerts);
+    } else if (method === 'planb') {
+      shellGeo = await buildShellGeoPlanB(uniqueVerts, allFaces, faces, thk, normVerts);
+    } else if (method === 'solidcap') {
+      shellGeo = buildShellGeoSolidCap(uniqueVerts, faces, thk, normVerts, colorize);
     } else {
       shellGeo = buildShellGeo(uniqueVerts, faces, thk, normVerts);
     }
@@ -1331,8 +2161,13 @@ async function applyShell() {
 
   if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
   const th = getTheme() ? THEME.light : THEME.dark;
+  // 部位カラー表示が有効かつ頂点カラー属性がある場合は vertexColors を使用
+  const hasVertexColor = colorize && shellGeo.attributes.color;
   shellMesh = new THREE.Mesh(shellGeo, new THREE.MeshPhongMaterial({
-    color: th.scaled.color, specular: th.scaled.specular, shininess: th.scaled.shininess,
+    color: hasVertexColor ? 0xffffff : th.scaled.color,
+    specular: hasVertexColor ? 0x444444 : th.scaled.specular,
+    shininess: hasVertexColor ? 40 : th.scaled.shininess,
+    vertexColors: !!hasVertexColor,
     transparent: true, opacity: 0.92, side: THREE.DoubleSide
   }));
   scene.add(shellMesh);
@@ -1340,9 +2175,15 @@ async function applyShell() {
   if (scaledMesh) scaledMesh.visible = false;
   document.getElementById('dlBtn').disabled = false;
   document.getElementById('shellResetBtn').style.display = 'block';
+  document.getElementById('shellPostSmooth').style.display = 'block';
   document.getElementById('shellBtn').disabled = false;
   const tc = shellGeo.attributes.position.count / 3;
-  setMsg(`✓ 肉厚適用完了 — ${tc.toLocaleString()} 三角形`);
+
+  const tireCut = document.getElementById('shellCutTire').checked && wheels.front && wheels.rear;
+  const boundWarn = method === 'hollow' && shellGeo._boundaryCount > 0
+    ? `　⚠ 境界エッジ ${shellGeo._boundaryCount} 本（メッシュが完全に閉じていない可能性）` : '';
+  const tireNote = tireCut ? '　✂ タイヤ穴くり抜き済み' : '';
+  setMsg(`✓ 完了 — ${tc.toLocaleString()} 三角形${tireNote}${boundWarn}`);
 }
 
 function resetShell() {
@@ -1352,11 +2193,91 @@ function resetShell() {
   if (scaledMesh) scaledMesh.visible = true;
   else if (mainMesh) mainMesh.visible = true;
   document.getElementById('shellResetBtn').style.display = 'none';
+  document.getElementById('shellPostSmooth').style.display = 'none';
+  buildTireCylinders();  // Z範囲を再計算して円筒を再描画
   setMsg('シェルをリセットしました');
 }
 
 document.getElementById('shellBtn').addEventListener('click', applyShell);
+
+// 後スムージング: 生成済みシェルの頂点をラプラシアンで平滑化する
+async function applyShellPostSmooth() {
+  if (!shellGeo) return;
+  const iter = Math.max(1, parseInt(document.getElementById('shellPostIter').value) || 10);
+  document.getElementById('shellPostBtn').disabled = true;
+  await yld(`後スムージング中 (${iter}回)...`);
+
+  // シェルジオメトリを溶接して頂点共有グラフを得る
+  const { uniqueVerts, faces } = weldGeo(shellGeo);
+  const smoothed = laplacianSmooth(uniqueVerts, faces, iter);
+
+  // スムージング後の座標でバッファを再構築
+  const positions = [], normals = [];
+  for (const [a,b,c] of faces) {
+    const p0=smoothed[a],p1=smoothed[b],p2=smoothed[c];
+    const e1=new THREE.Vector3().subVectors(p1,p0),e2=new THREE.Vector3().subVectors(p2,p0);
+    const n=new THREE.Vector3().crossVectors(e1,e2).normalize();
+    for (const p of [p0,p1,p2]) { positions.push(p.x,p.y,p.z); normals.push(n.x,n.y,n.z); }
+  }
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(positions), 3));
+  newGeo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(normals),   3));
+  newGeo.computeBoundingBox();
+
+  shellGeo = newGeo;
+  if (shellMesh) { shellMesh.geometry.dispose(); shellMesh.geometry = shellGeo; }
+  document.getElementById('shellPostBtn').disabled = false;
+  setMsg(`✓ 後スムージング完了 (${iter}回)`);
+}
+document.getElementById('shellPostBtn').addEventListener('click', applyShellPostSmooth);
+
+// 手法切替時に推奨設定へ自動調整
+const SHELL_HINTS = {
+  hollow:    '<b style="color:var(--accent)">クローズドホロー</b>：閉じたソリッドメッシュ（AI生成モデル等）を中空シェルに変換します。壁ストリップを一切生成しないため、スライサーが壁2枚だけを認識するクリーンな出力になります。<b style="color:var(--text)">部位カラー表示</b>で <span style="color:#00d9ff">■外面</span> <span style="color:#38d450">■内面</span> を確認できます。境界エッジが検出された場合は警告を表示します（メッシュが閉じていない場合）。',
+  offset:    '<b style="color:var(--text)">法線オフセット</b>：各頂点法線方向に押し込み。スムージングで毛羽立ちを軽減。',
+  scale:     '<b style="color:var(--text)">スケールシェル</b>：スムージング20回・肉厚2mmを推奨。外向きフィルタを併用すると外面のみに肉厚を生成します。',
+  sdf:       '<b style="color:var(--text)">SDF補正オフセット</b>：UDF勾配から安定した法線を計算し、スパイク状アーティファクトを抑制。メッシュ修復と組み合わせると効果的。法線オフセットより処理時間が長くなります。',
+  planb:     '<b style="color:var(--text)">シュリンクラップ</b>：法線を使わず外面への等距離投影で内面を生成。スパイク完全回避。スムージングで収縮した抽象形状から補正を開始できます。',
+  solidcap:  '<b style="color:var(--accent2)">ソリッドキャップ</b>：境界頂点の内側Yを外側と揃えることで底面リングを水平化し、スライサーによる二層誤検知（壁4枚問題）を解消します。<b style="color:var(--text)">部位カラー表示</b>を有効にすると <span style="color:#00d9ff">■外面</span> <span style="color:#38d450">■内面</span> <span style="color:#ff8c1a">■底面リング</span> を色分けして確認できます。'
+};
+function updateShellMethodUI(method) {
+  const smooth = document.getElementById('shellSmooth');
+  const thk    = document.getElementById('shellThk');
+
+  if (method === 'scale') {
+    if (+smooth.value === 0) smooth.value = 20;
+    if (+thk.value < 2) thk.value = 2.0;
+  }
+  if (method === 'planb') {
+    if (+smooth.value === 0) smooth.value = 20;
+  }
+  if (method === 'hollow' || method === 'solidcap') {
+    document.getElementById('shellColorize').checked = true;
+  }
+
+  // hollow / solidcap では面フィルタ・スムージング・修復が不要 → グレーアウト
+  const isHollowLike = method === 'hollow' || method === 'solidcap';
+  for (const id of ['shellFilterGroup', 'shellSmoothGroup', 'shellRepairGroup']) {
+    const el = document.getElementById(id);
+    el.style.opacity       = isHollowLike ? '0.3' : '1';
+    el.style.pointerEvents = isHollowLike ? 'none' : '';
+  }
+
+  document.getElementById('shellHint').innerHTML = SHELL_HINTS[method] || SHELL_HINTS.offset;
+}
+document.getElementById('shellMethod').addEventListener('change', function() {
+  updateShellMethodUI(this.value);
+});
+// 初期状態を適用
+updateShellMethodUI(document.getElementById('shellMethod').value);
 document.getElementById('shellResetBtn').addEventListener('click', resetShell);
+
+// タイヤ穴くり抜きチェックボックス ─ パネル表示切替・円筒可視化更新
+document.getElementById('shellCutTire').addEventListener('change', function() {
+  document.getElementById('tireCutPanel').style.display = this.checked ? 'block' : 'none';
+  buildTireCylinders();
+});
+document.getElementById('tireClearance').addEventListener('input', () => buildTireCylinders());
 
 function setMsg(t){ document.getElementById('stepHint').textContent=t; }
 
