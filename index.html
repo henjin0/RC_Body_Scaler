@@ -390,9 +390,17 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     </div>
     <div class="inp-group" style="display:flex;align-items:center;gap:8px;padding:4px 0">
       <input type="checkbox" id="shellCutTire" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent2);cursor:pointer">
-      <label for="shellCutTire" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">タイヤ穴をくり抜く<br><span style="color:var(--dim)">オリジナル座標でZ全貫通カット → スケール適用 — オレンジ円筒で可視化</span></label>
+      <label for="shellCutTire" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">タイヤ穴をくり抜く<br><span style="color:var(--dim)">カット半径 = タイヤ半径 + クリアランス + 肉厚 — オレンジ円筒で可視化</span></label>
     </div>
     <div id="tireCutPanel" style="display:none;margin-left:22px;margin-bottom:6px">
+      <div class="inp-group">
+        <label>タイヤ半径（カット用・スケール後実寸）</label>
+        <div class="inp-row">
+          <input type="number" id="cutTireR" placeholder="例: 30" step="0.5" value="30">
+          <span class="unit">mm</span>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-top:3px">スケール適用後の実際のタイヤ半径を入力</div>
+      </div>
       <div class="inp-group">
         <label>クリアランス (mm)</label>
         <div class="inp-row">
@@ -535,21 +543,30 @@ function buildTireCylinders() {
   if (!document.getElementById('shellCutTire').checked) return;
   if (!wheels.front && !wheels.rear) return;
 
-  // タイヤ穴はオリジナル座標でカットするため、可視化もオリジナル座標で表示
-  const tireRaw = Math.max(1, parseFloat(document.getElementById('tireR').value) || 30);
-  const clearance = Math.max(0, parseFloat(document.getElementById('tireClearance').value) || 2);
-  const cutR = tireRaw + clearance;
+  // cutTireR = スケール後の実寸タイヤ半径（カット用）
+  // スケーリング適用済みの場合はホイール位置もスケール後座標で表示
+  const cutTireRaw = Math.max(1, parseFloat(document.getElementById('cutTireR').value)      || 30);
+  const clearance  = Math.max(0, parseFloat(document.getElementById('tireClearance').value) || 2);
+  const shellThk   = Math.max(0, parseFloat(document.getElementById('shellThk').value)      || 0);
+  const cutR = cutTireRaw + clearance + shellThk;
 
-  // オリジナルモデルのZ範囲でシリンダー高さを決定
-  const refGeo = currentGeo;
+  // スケール係数（未適用なら 1）
+  const sc = appliedScales || { sx: 1, sy: 1, sz: 1 };
+
+  // モデルのZ範囲（スケール後）でシリンダー高さを決定
+  const refGeo = scaledGeo || currentGeo;
   let zHalf = 200;
   if (refGeo?.boundingBox) {
-    const sz = new THREE.Vector3();
-    refGeo.boundingBox.getSize(sz);
-    zHalf = sz.z * 0.5 + 10;
+    const bsz = new THREE.Vector3();
+    refGeo.boundingBox.getSize(bsz);
+    zHalf = bsz.z * 0.5 + 10;
   }
 
   const addCyl = (wx, wy) => {
+    // ホイール位置をスケール後座標に変換
+    const dispX = wx * sc.sx;
+    const dispY = wy * sc.sy;
+
     // 半透明ソリッド（切削ボリューム）
     const geo = new THREE.CylinderGeometry(cutR, cutR, zHalf * 2, 48, 1, true);
     const mat = new THREE.MeshBasicMaterial({
@@ -557,8 +574,8 @@ function buildTireCylinders() {
       side: THREE.DoubleSide, depthWrite: false
     });
     const mesh = new THREE.Mesh(geo, mat);
-    mesh.rotation.x = Math.PI / 2;  // Y軸→Z軸に回転
-    mesh.position.set(wx, wy, 0);
+    mesh.rotation.x = Math.PI / 2;
+    mesh.position.set(dispX, dispY, 0);
     mesh.renderOrder = 500;
     scene.add(mesh);
     tireCylinderMeshes.push(mesh);
@@ -569,7 +586,7 @@ function buildTireCylinders() {
       const pts = [];
       for (let i = 0; i <= 64; i++) {
         const a = (i / 64) * Math.PI * 2;
-        pts.push(new THREE.Vector3(wx + Math.cos(a) * cutR, wy + Math.sin(a) * cutR, z));
+        pts.push(new THREE.Vector3(dispX + Math.cos(a) * cutR, dispY + Math.sin(a) * cutR, z));
       }
       const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMat);
       line.renderOrder = 501;
@@ -580,8 +597,8 @@ function buildTireCylinders() {
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2;
       const vpts = [
-        new THREE.Vector3(wx + Math.cos(a) * cutR, wy + Math.sin(a) * cutR, -zHalf),
-        new THREE.Vector3(wx + Math.cos(a) * cutR, wy + Math.sin(a) * cutR,  zHalf),
+        new THREE.Vector3(dispX + Math.cos(a) * cutR, dispY + Math.sin(a) * cutR, -zHalf),
+        new THREE.Vector3(dispX + Math.cos(a) * cutR, dispY + Math.sin(a) * cutR,  zHalf),
       ];
       const vline = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMat);
       vline.renderOrder = 501;
@@ -590,7 +607,6 @@ function buildTireCylinders() {
     }
   };
 
-  // オリジナル座標（スケール前）で表示
   if (wheels.front) addCyl(wheels.front.x, wheels.front.y);
   if (wheels.rear)  addCyl(wheels.rear.x,  wheels.rear.y);
 }
@@ -603,6 +619,10 @@ function removeTireCylinders() {
   });
   tireCylinderMeshes = [];
 }
+
+// ── 底面開口ツールボディ可視化 ────────────────────────────────
+// 差集合に使う「シフト後の内側面メッシュ」を半透明で表示する。
+// innerVerts / innerFaces / shiftY から三角形メッシュを構築してシーンに追加。
 
 // ── Three.js ───────────────────────────────────────────────────
 function initThree() {
@@ -1842,6 +1862,67 @@ function cutTireFaces(geo, tireDefs) {
   return g;
 }
 
+// ── 底面開口（形状追従）────────────────────────────────────────
+// 内側面モデルの頂点から XZ グリッドごとの最小 Y マップを構築し、
+// シェル面の重心がそのマップ値以下なら除去する。
+// shiftY > 0 のとき、内側面を下方にシフトしてカット範囲を広げる。
+
+function buildFloorMap(verts) {
+  // グリッドサイズ：モデルの XZ 範囲から自動決定（最小 1mm、最大 20mm）
+  let xMin = Infinity, xMax = -Infinity, zMin = Infinity, zMax = -Infinity;
+  for (const v of verts) {
+    if (v.x < xMin) xMin = v.x; if (v.x > xMax) xMax = v.x;
+    if (v.z < zMin) zMin = v.z; if (v.z > zMax) zMax = v.z;
+  }
+  const gs = Math.max(1, Math.min(20, (xMax - xMin + zMax - zMin) / 400));
+  const map = new Map();
+  for (const v of verts) {
+    const gx = Math.floor(v.x / gs), gz = Math.floor(v.z / gs);
+    const key = `${gx}_${gz}`;
+    const cur = map.get(key) ?? Infinity;
+    if (v.y < cur) map.set(key, v.y);
+  }
+  return { map, gs };
+}
+
+function sampleFloorY(floorMap, x, z) {
+  const { map, gs } = floorMap;
+  const gx = Math.floor(x / gs), gz = Math.floor(z / gs);
+  let minY = Infinity;
+  for (let dx = -1; dx <= 1; dx++)
+    for (let dz = -1; dz <= 1; dz++) {
+      const y = map.get(`${gx+dx}_${gz+dz}`);
+      if (y !== undefined && y < minY) minY = y;
+    }
+  return minY;
+}
+
+// 底面開口（形状追従）: floorMap 以下の重心 Y を持つ面を除去する
+function cutByFloorMap(geo, floorMap) {
+  const pos = geo.attributes.position.array;
+  const nor = geo.attributes.normal.array;
+  const col = geo.attributes.color ? geo.attributes.color.array : null;
+  const newPos = [], newNor = [], newCol = [];
+  for (let i = 0; i < pos.length; i += 9) {
+    const cx = (pos[i]   + pos[i+3] + pos[i+6]) / 3;
+    const cy = (pos[i+1] + pos[i+4] + pos[i+7]) / 3;
+    const cz = (pos[i+2] + pos[i+5] + pos[i+8]) / 3;
+    const fy = sampleFloorY(floorMap, cx, cz);
+    // fy === Infinity → その XZ に内側面データなし → 保持
+    if (fy === Infinity || cy > fy) {
+      for (let j = 0; j < 9; j++) { newPos.push(pos[i+j]); newNor.push(nor[i+j]); }
+      if (col) for (let j = 0; j < 9; j++) newCol.push(col[i+j]);
+    }
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(newNor), 3));
+  if (col && newCol.length) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(newCol), 3));
+  g.computeBoundingBox();
+  return g;
+}
+
+
 // クローズドホロー法: 閉じたソリッドメッシュ（AI生成モデル等）を中空シェルに変換する。
 // 境界エッジが存在しないため壁ストリップは一切不要 → スライサーが壁2枚だけを認識するクリーンな出力。
 // withColors=true のとき 外面=シアン / 内面=グリーン で頂点カラーを付与。
@@ -1914,7 +1995,9 @@ function buildShellGeoHollow(uniqueVerts, faces, thickness, normVerts, withColor
   if (withColors && colors.length)
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
   g.computeBoundingBox();
-  g._boundaryCount = boundaryCount;  // 呼び出し元で警告表示に使用
+  g._boundaryCount = boundaryCount;
+  g._innerVerts    = innerVerts;  // 底面開口カット & 可視化に使用
+  g._innerFaces    = faces;       // ツールボディ可視化に使用
   return g;
 }
 
@@ -2023,19 +2106,29 @@ function buildShellGeoSolidCap(uniqueVerts, faces, thickness, normVerts, withCol
   if (withColors && colors.length)
     g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(colors), 3));
   g.computeBoundingBox();
+  g._innerVerts = floorInner;  // 底面開口カット & 可視化に使用
+  g._innerFaces = faces;       // ツールボディ可視化に使用
   return g;
 }
 
 async function applyShell() {
   if (!currentGeo && !scaledGeo) return;
 
+  const thk = parseFloat(document.getElementById('shellThk').value);
+  if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
+
   // ── タイヤ穴くり抜き（スケール前のオリジナル座標で処理）──────
-  // currentGeo に対してカット → スケール適用 → src として使用
+  // カット半径 = タイヤ半径 + クリアランス + 肉厚（すべてスケール後の実寸 mm）
+  // スケーリング適用済みの場合は sy で割り戻してプレスケール座標のカット半径に変換する
   let src;
   if (document.getElementById('shellCutTire').checked && wheels.front && wheels.rear && currentGeo) {
-    const tireR     = parseFloat(document.getElementById('tireR').value)         || 30;
+    const cutTireR  = parseFloat(document.getElementById('cutTireR').value)       || 30;
     const clearance = parseFloat(document.getElementById('tireClearance').value) || 2;
-    const r2 = (tireR + clearance) * (tireR + clearance);
+    const cutRPost = cutTireR + clearance + thk;  // スケール後の実寸カット半径
+    // プレスケール座標でのカット半径: sy で割り戻す（Y方向スケールを基準）
+    const scaleFactor = appliedScales ? appliedScales.sy : 1;
+    const cutR = cutRPost / scaleFactor;
+    const r2 = cutR * cutR;
     await yld('タイヤ穴をくり抜き中（スケール前）...');
     let cutGeo = cutTireFaces(currentGeo, [
       { wx: wheels.front.x, wy: wheels.front.y, r2 },
@@ -2051,8 +2144,6 @@ async function applyShell() {
   } else {
     src = scaledGeo || currentGeo;
   }
-  const thk = parseFloat(document.getElementById('shellThk').value);
-  if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
   const method     = document.getElementById('shellMethod').value;
   const filterMode = document.getElementById('shellFilter').value;
   const smoothIter = Math.max(0, parseInt(document.getElementById('shellSmooth').value) || 0);
@@ -2159,6 +2250,7 @@ async function applyShell() {
     return;
   }
 
+
   if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
   const th = getTheme() ? THEME.light : THEME.dark;
   // 部位カラー表示が有効かつ頂点カラー属性がある場合は vertexColors を使用
@@ -2179,10 +2271,10 @@ async function applyShell() {
   document.getElementById('shellBtn').disabled = false;
   const tc = shellGeo.attributes.position.count / 3;
 
-  const tireCut = document.getElementById('shellCutTire').checked && wheels.front && wheels.rear;
+  const tireCut   = document.getElementById('shellCutTire').checked && wheels.front && wheels.rear;
   const boundWarn = method === 'hollow' && shellGeo._boundaryCount > 0
     ? `　⚠ 境界エッジ ${shellGeo._boundaryCount} 本（メッシュが完全に閉じていない可能性）` : '';
-  const tireNote = tireCut ? '　✂ タイヤ穴くり抜き済み' : '';
+  const tireNote  = tireCut   ? '　✂ タイヤ穴くり抜き済み' : '';
   setMsg(`✓ 完了 — ${tc.toLocaleString()} 三角形${tireNote}${boundWarn}`);
 }
 
@@ -2194,7 +2286,7 @@ function resetShell() {
   else if (mainMesh) mainMesh.visible = true;
   document.getElementById('shellResetBtn').style.display = 'none';
   document.getElementById('shellPostSmooth').style.display = 'none';
-  buildTireCylinders();  // Z範囲を再計算して円筒を再描画
+  buildTireCylinders();
   setMsg('シェルをリセットしました');
 }
 
@@ -2272,12 +2364,16 @@ document.getElementById('shellMethod').addEventListener('change', function() {
 updateShellMethodUI(document.getElementById('shellMethod').value);
 document.getElementById('shellResetBtn').addEventListener('click', resetShell);
 
+// 底面開口チェックボックス ─ パネル表示切替
+
 // タイヤ穴くり抜きチェックボックス ─ パネル表示切替・円筒可視化更新
 document.getElementById('shellCutTire').addEventListener('change', function() {
   document.getElementById('tireCutPanel').style.display = this.checked ? 'block' : 'none';
   buildTireCylinders();
 });
+document.getElementById('cutTireR').addEventListener('input',    () => buildTireCylinders());
 document.getElementById('tireClearance').addEventListener('input', () => buildTireCylinders());
+document.getElementById('shellThk').addEventListener('input',      () => buildTireCylinders());
 
 function setMsg(t){ document.getElementById('stepHint').textContent=t; }
 
