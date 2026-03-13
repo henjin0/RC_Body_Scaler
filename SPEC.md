@@ -109,14 +109,33 @@ useOrtho     : boolean
 
 | UI要素 | ID | 説明 |
 |--------|----|------|
-| 手法 | `shellMethod` | `offset`（法線オフセット）/ `scale`（スケールシェル） |
+| 手法 | `shellMethod` | `hollow`（クローズドホロー）/ `offset`（法線オフセット）/ `scale`（スケールシェル）/ `solidcap`（ソリッドキャップ） |
 | 肉厚 (mm) | `shellThk` | 内側に押し込む厚み（正の値） |
 | 面フィルタ | `shellFilter` | `none` / `outward` / `raycast` |
 | スムージング回数 | `shellSmooth` | 0 = 無効、1〜200 = ラプラシアン反復回数 |
+| 部位カラー表示 | `shellColorize` | チェック時、外面=シアン / 内面=グリーン / 底面リング=オレンジ で頂点カラーを付与 |
+| タイヤ穴くり抜き | `shellCutTire` | チェック時、前輪・後輪それぞれ Z 方向全貫通シリンダー 2 本でシェルから除去（左右対称のため 2 本で 4 タイヤをまとめて処理） |
+| クリアランス | `tireClearance` | タイヤ半径に加算する余裕代（デフォルト 2mm） |
+
+**手法: クローズドホロー（`hollow`）** ← AI生成モデル推奨
+- **対象**: 閉じたウォータータイトなソリッドメッシュ（境界エッジがゼロのもの）
+- 外面 = 元の面をそのまま使用
+- 内面 = 法線逆方向にオフセットした面（逆巻き）
+- **壁ストリップを一切生成しない** → スライサーが壁2枚だけ認識するクリーンな出力
+- 境界エッジが検出された場合はステータスバーに件数を警告表示（処理は継続）
+- `hollow` 選択時は部位カラー表示を自動 ON
+- `g._boundaryCount` で境界エッジ数を返す
 
 **手法: 法線オフセット（`offset`）**
 - 各頂点の面積加重法線を計算し、法線の逆方向に `thickness` mm オフセットして内面頂点を生成
 - スムージング > 0 の場合、ラプラシアンスムージング済み頂点の法線を使ってオフセット方向を算出（外面位置は元のまま保持）
+
+**手法: ソリッドキャップ（`solidcap`）**
+- 境界頂点の内側 Y 座標を外側境界と同一にクランプし、底面リングを水平化する
+- 現行手法の「斜め壁ストリップ」をスライサーが複数の壁として誤認する問題（壁4枚問題）を解消
+- 内側 XZ は法線オフセットで計算、Y のみ外側にそろえる
+- 部位カラー表示（`shellColorize` チェック）を有効にすると 外面=シアン / 内面=グリーン / 底面リング=オレンジ で色分け表示
+- `solidcap` 選択時は部位カラー表示を自動 ON
 
 **手法: スケールシェル（`scale`）**
 - 全頂点の重心を算出
@@ -228,6 +247,9 @@ const THEME = {
 | `laplacianSmooth(uniqueVerts, faces, iterations)` | 隣接平均によるラプラシアンスムージング、抽象化頂点配列を返す |
 | `buildShellGeo(uniqueVerts, faces, thickness, normVerts)` | 法線オフセット方式でシェルジオメトリを生成 |
 | `buildShellGeoScale(uniqueVerts, faces, thickness, normVerts)` | スケールシェル方式でシェルジオメトリを生成 |
+| `cutTireFaces(geo, tireDefs)` | Z方向全貫通シリンダーのXY距離判定で面を除去してタイヤ穴を作成。`tireDefs`: `[{wx,wy,r2}]` |
+| `buildShellGeoHollow(uniqueVerts, faces, thickness, normVerts, withColors)` | クローズドホロー方式。閉じたソリッドを中空化。壁ストリップなし。`withColors=true` で部位別頂点カラーを付与。`g._boundaryCount` で境界エッジ数を返す |
+| `buildShellGeoSolidCap(uniqueVerts, faces, thickness, normVerts, withColors)` | ソリッドキャップ方式。境界YクランプによりスライサーのB層誤検知を解消。`withColors=true` で部位別頂点カラーを付与 |
 | `applyShell()` | シェル生成パイプライン全体を async で実行（進捗表示付き） |
 | `resetShell()` | shellMesh/shellGeo を破棄し元メッシュを再表示 |
 
