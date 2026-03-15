@@ -109,13 +109,29 @@ useOrtho     : boolean
 
 | UI要素 | ID | 説明 |
 |--------|----|------|
-| 手法 | `shellMethod` | `hollow`（クローズドホロー）/ `offset`（法線オフセット）/ `scale`（スケールシェル）/ `solidcap`（ソリッドキャップ） |
+| 手法 | `shellMethod` | `solidcap`（ソリッドキャップ・**デフォルト/おすすめ**）/ `hollow`（クローズドホロー）/ `offset`（法線オフセット）/ `scale`（スケールシェル）/ `sdf`（SDF補正）/ `planb`（シュリンクラップ） |
 | 肉厚 (mm) | `shellThk` | 内側に押し込む厚み（正の値） |
 | 面フィルタ | `shellFilter` | `none` / `outward` / `raycast` |
 | スムージング回数 | `shellSmooth` | 0 = 無効、1〜200 = ラプラシアン反復回数 |
 | 部位カラー表示 | `shellColorize` | チェック時、外面=シアン / 内面=グリーン / 底面リング=オレンジ で頂点カラーを付与 |
 | タイヤ穴くり抜き | `shellCutTire` | チェック時、前輪・後輪それぞれ Z 方向全貫通シリンダー 2 本でシェルから除去（左右対称のため 2 本で 4 タイヤをまとめて処理） |
 | クリアランス | `tireClearance` | タイヤ半径に加算する余裕代（デフォルト 2mm） |
+| カット範囲制限 | `shellClipRange` | チェック時、6方向それぞれの最大到達距離を % で制限（100=制限なし） |
+
+**カット範囲制限（`shellClipRange`）**
+
+| ID | 方向 | 動作 |
+|----|------|------|
+| `clipXp` | X+ | `bbox.max.x × (値/100)` を超える三角形を除去 |
+| `clipXm` | X− | `bbox.min.x × (値/100)` を下回る三角形を除去 |
+| `clipYp` | Y+ | `bbox.max.y × (値/100)` を超える三角形を除去 |
+| `clipYm` | Y− | `bbox.min.y × (値/100)` を下回る三角形を除去 |
+| `clipZp` | Z+ | `bbox.max.z × (値/100)` を超える三角形を除去 |
+| `clipZm` | Z− | `bbox.min.z × (値/100)` を下回る三角形を除去 |
+
+- 判定は三角形の重心座標で行う（頂点単位ではない）
+- シェル生成完了後に `clipBodyByRange()` で適用（タイヤ穴くり抜きと独立して動作）
+- 頂点カラー属性がある場合はそのまま引き継ぐ
 
 **手法: クローズドホロー（`hollow`）** ← AI生成モデル推奨
 - **対象**: 閉じたウォータータイトなソリッドメッシュ（境界エッジがゼロのもの）
@@ -174,6 +190,11 @@ buildShellGeoScale()
 - 表示中は `mainMesh` / `scaledMesh` を非表示にする
 - `applyTheme3D` でテーマ変更時に色を追従
 
+**後スムージング（`applyShellPostSmooth`）**
+- 生成済み `shellGeo` を `weldGeo` → `laplacianSmooth` → バッファ再構築の順で平滑化
+- 新ジオメトリは頂点カラー属性を持たないため、スムージング完了後にマテリアルの `vertexColors` を `false` に戻し、テーマ色（`THEME.scaled`）を再適用する
+  - これを行わないと `vertexColors: true` のまま色データが欠落し、モデルが真っ黒になる
+
 ---
 
 ## テーマ
@@ -199,7 +220,7 @@ buildShellGeoScale()
 const THEME = {
   dark: {
     model:  { color: 0x1a2a3a, specular: 0x00e5ff, shininess: 60 },
-    scaled: { color: 0x0a2a18, specular: 0x39d353, shininess: 80 },
+    scaled: { color: 0xc8ffe8, specular: 0xffffff, shininess: 80 },  // ミントホワイト（シェル・スケール済みメッシュ）
     ghost:  { color: 0x1a2a3a, specular: 0x00e5ff, shininess: 30 },
     front:  0x00e5ff,  rear: 0xff6b35,  box: 0xf6c90e,
     light1: { color: 0x00e5ff, intensity: 0.8 },
@@ -207,7 +228,7 @@ const THEME = {
   },
   light: {
     model:  { color: 0x8ab0cc, specular: 0x336688, shininess: 50 },
-    scaled: { color: 0x5a9e72, specular: 0x2d7a44, shininess: 70 },
+    scaled: { color: 0x2e7d5a, specular: 0x1a5c3a, shininess: 75 },
     ghost:  { color: 0x8ab0cc, specular: 0x336688, shininess: 20 },
     front:  0x0077aa,  rear: 0xcc5500,  box: 0x996600,
     light1: { color: 0x6699bb, intensity: 0.6 },
@@ -248,6 +269,7 @@ const THEME = {
 | `buildShellGeo(uniqueVerts, faces, thickness, normVerts)` | 法線オフセット方式でシェルジオメトリを生成 |
 | `buildShellGeoScale(uniqueVerts, faces, thickness, normVerts)` | スケールシェル方式でシェルジオメトリを生成 |
 | `cutTireFaces(geo, tireDefs)` | Z方向全貫通シリンダーのXY距離判定で面を除去してタイヤ穴を作成。`tireDefs`: `[{wx,wy,r2}]` |
+| `clipBodyByRange(geo, ranges)` | 各軸6方向のクリップ平面で三角形を除去。`ranges`: `{xp,xm,yp,ym,zp,zm}`（各値 0〜100%）。バウンディングボックス最大値×割合をクリップ平面として使用 |
 | `buildShellGeoHollow(uniqueVerts, faces, thickness, normVerts, withColors)` | クローズドホロー方式。閉じたソリッドを中空化。壁ストリップなし。`withColors=true` で部位別頂点カラーを付与。`g._boundaryCount` で境界エッジ数を返す |
 | `buildShellGeoSolidCap(uniqueVerts, faces, thickness, normVerts, withColors)` | ソリッドキャップ方式。境界YクランプによりスライサーのB層誤検知を解消。`withColors=true` で部位別頂点カラーを付与 |
 | `applyShell()` | シェル生成パイプライン全体を async で実行（進捗表示付き） |

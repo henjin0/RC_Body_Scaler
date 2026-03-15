@@ -2421,7 +2421,17 @@ async function applyShellPostSmooth() {
   newGeo.computeBoundingBox();
 
   shellGeo = newGeo;
-  if (shellMesh) { shellMesh.geometry.dispose(); shellMesh.geometry = shellGeo; }
+  if (shellMesh) {
+    shellMesh.geometry.dispose();
+    shellMesh.geometry = shellGeo;
+    // 頂点カラー属性がなくなるのでマテリアルをテーマ色に戻す
+    const th = getTheme() ? THEME.light : THEME.dark;
+    shellMesh.material.vertexColors = false;
+    shellMesh.material.color.set(th.scaled.color);
+    shellMesh.material.specular.set(th.scaled.specular);
+    shellMesh.material.shininess = th.scaled.shininess;
+    shellMesh.material.needsUpdate = true;
+  }
   document.getElementById('shellPostBtn').disabled = false;
   setMsg(`✓ 後スムージング完了 (${iter}回)`);
 }
@@ -2502,7 +2512,7 @@ function getTheme() {
 const THEME = {
   dark: {
     model:    { color:0x1a2a3a, specular:0x00e5ff, shininess:60 },
-    scaled:   { color:0x0a2a18, specular:0x39d353, shininess:80 },
+    scaled:   { color:0xc8ffe8, specular:0xffffff, shininess:80 },
     ghost:    { color:0x1a2a3a, specular:0x00e5ff, shininess:30 },
     front:    0x00e5ff,   // シアン
     rear:     0xff6b35,   // オレンジ
@@ -2512,7 +2522,7 @@ const THEME = {
   },
   light: {
     model:    { color:0x8ab0cc, specular:0x336688, shininess:50 },
-    scaled:   { color:0x5a9e72, specular:0x2d7a44, shininess:70 },
+    scaled:   { color:0x2e7d5a, specular:0x1a5c3a, shininess:75 },
     ghost:    { color:0x8ab0cc, specular:0x336688, shininess:20 },
     front:    0x0077aa,   // 青（色弱対応）
     rear:     0xcc5500,   // 橙（色弱対応）
