@@ -350,12 +350,12 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     <div class="inp-group">
       <label>手法</label>
       <select id="shellMethod" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
+        <option value="solidcap">★ ソリッドキャップ — 底面を水平化して二層化解消【おすすめ】</option>
         <option value="hollow">クローズドホロー — 閉じたソリッドを中空化（AI生成モデル推奨）</option>
         <option value="offset">法線オフセット — 頂点法線方向に押し込む</option>
         <option value="scale">スケールシェル — 縮小コピーを内面に使用</option>
         <option value="sdf">SDF補正オフセット — SDF勾配で法線を精密化</option>
         <option value="planb">シュリンクラップ — 等距離補正で内面を生成</option>
-        <option value="solidcap">ソリッドキャップ — 底面を水平化して二層化解消</option>
       </select>
     </div>
     <div class="inp-group">
@@ -406,6 +406,56 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
         <div class="inp-row">
           <input type="number" id="tireClearance" placeholder="例: 2" step="0.5" min="0" value="2">
           <span class="unit">mm</span>
+        </div>
+      </div>
+    </div>
+    <div class="inp-group" style="display:flex;align-items:center;gap:8px;padding:4px 0">
+      <input type="checkbox" id="shellClipRange" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent2);cursor:pointer">
+      <label for="shellClipRange" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">カット範囲を制限<br><span style="color:var(--dim)">各軸・各方向の最大到達距離を % で指定（100=制限なし）</span></label>
+    </div>
+    <div id="clipRangePanel" style="display:none;margin-left:22px;margin-bottom:6px">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px">
+        <div class="inp-group">
+          <label style="color:var(--ax)">X+</label>
+          <div class="inp-row">
+            <input type="number" id="clipXp" value="100" step="1" min="0" max="100">
+            <span class="unit">%</span>
+          </div>
+        </div>
+        <div class="inp-group">
+          <label style="color:var(--ax)">X−</label>
+          <div class="inp-row">
+            <input type="number" id="clipXm" value="100" step="1" min="0" max="100">
+            <span class="unit">%</span>
+          </div>
+        </div>
+        <div class="inp-group">
+          <label style="color:var(--ay)">Y+</label>
+          <div class="inp-row">
+            <input type="number" id="clipYp" value="100" step="1" min="0" max="100">
+            <span class="unit">%</span>
+          </div>
+        </div>
+        <div class="inp-group">
+          <label style="color:var(--ay)">Y−</label>
+          <div class="inp-row">
+            <input type="number" id="clipYm" value="100" step="1" min="0" max="100">
+            <span class="unit">%</span>
+          </div>
+        </div>
+        <div class="inp-group">
+          <label style="color:var(--az)">Z+</label>
+          <div class="inp-row">
+            <input type="number" id="clipZp" value="100" step="1" min="0" max="100">
+            <span class="unit">%</span>
+          </div>
+        </div>
+        <div class="inp-group">
+          <label style="color:var(--az)">Z−</label>
+          <div class="inp-row">
+            <input type="number" id="clipZm" value="100" step="1" min="0" max="100">
+            <span class="unit">%</span>
+          </div>
         </div>
       </div>
     </div>
@@ -1862,6 +1912,47 @@ function cutTireFaces(geo, tireDefs) {
   return g;
 }
 
+// カット範囲制限: 各軸の最大到達距離を % で制限し、範囲外の三角形を除去する。
+// ranges: { xp, xm, yp, ym, zp, zm } — 各値は 0〜100 (%)
+//   xp: X+ 方向の制限（100 = bbox.max.x まで、50 = 原点〜先端の半分まで）
+//   xm: X− 方向の制限（bbox.min.x が負の値であることを前提）
+// 頂点カラー属性がある場合はそのまま引き継ぐ。
+function clipBodyByRange(geo, ranges) {
+  const bbox = new THREE.Box3().setFromBufferAttribute(geo.attributes.position);
+
+  const clipXp = bbox.max.x * (ranges.xp / 100);
+  const clipXm = bbox.min.x * (ranges.xm / 100);
+  const clipYp = bbox.max.y * (ranges.yp / 100);
+  const clipYm = bbox.min.y * (ranges.ym / 100);
+  const clipZp = bbox.max.z * (ranges.zp / 100);
+  const clipZm = bbox.min.z * (ranges.zm / 100);
+
+  const pos = geo.attributes.position.array;
+  const nor = geo.attributes.normal.array;
+  const col = geo.attributes.color ? geo.attributes.color.array : null;
+  const newPos = [], newNor = [], newCol = [];
+
+  for (let i = 0; i < pos.length; i += 9) {
+    const cx = (pos[i]   + pos[i+3] + pos[i+6]) / 3;
+    const cy = (pos[i+1] + pos[i+4] + pos[i+7]) / 3;
+    const cz = (pos[i+2] + pos[i+5] + pos[i+8]) / 3;
+
+    if (cx > clipXp || cx < clipXm ||
+        cy > clipYp || cy < clipYm ||
+        cz > clipZp || cz < clipZm) continue;
+
+    for (let j = 0; j < 9; j++) { newPos.push(pos[i+j]); newNor.push(nor[i+j]); }
+    if (col) for (let j = 0; j < 9; j++) newCol.push(col[i+j]);
+  }
+
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
+  g.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(newNor), 3));
+  if (col && newCol.length) g.setAttribute('color', new THREE.BufferAttribute(new Float32Array(newCol), 3));
+  g.computeBoundingBox();
+  return g;
+}
+
 // ── 底面開口（形状追従）────────────────────────────────────────
 // 内側面モデルの頂点から XZ グリッドごとの最小 Y マップを構築し、
 // シェル面の重心がそのマップ値以下なら除去する。
@@ -2250,6 +2341,19 @@ async function applyShell() {
     return;
   }
 
+  // ── カット範囲制限（オプション）─────────────────────────────
+  if (document.getElementById('shellClipRange').checked) {
+    const ranges = {
+      xp: parseFloat(document.getElementById('clipXp').value) || 100,
+      xm: parseFloat(document.getElementById('clipXm').value) || 100,
+      yp: parseFloat(document.getElementById('clipYp').value) || 100,
+      ym: parseFloat(document.getElementById('clipYm').value) || 100,
+      zp: parseFloat(document.getElementById('clipZp').value) || 100,
+      zm: parseFloat(document.getElementById('clipZm').value) || 100,
+    };
+    await yld('カット範囲を制限中...');
+    shellGeo = clipBodyByRange(shellGeo, ranges);
+  }
 
   if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
   const th = getTheme() ? THEME.light : THEME.dark;
@@ -2370,6 +2474,9 @@ document.getElementById('shellResetBtn').addEventListener('click', resetShell);
 document.getElementById('shellCutTire').addEventListener('change', function() {
   document.getElementById('tireCutPanel').style.display = this.checked ? 'block' : 'none';
   buildTireCylinders();
+});
+document.getElementById('shellClipRange').addEventListener('change', function() {
+  document.getElementById('clipRangePanel').style.display = this.checked ? 'block' : 'none';
 });
 document.getElementById('cutTireR').addEventListener('input',    () => buildTireCylinders());
 document.getElementById('tireClearance').addEventListener('input', () => buildTireCylinders());
