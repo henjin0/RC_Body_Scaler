@@ -231,7 +231,19 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
   </div>
 
   <div class="section">
-    <div class="sec-title">03 / Wheel Points</div>
+    <div class="sec-title">03 / Mirror Symmetry</div>
+    <div style="font-size:11px;color:var(--dim);margin-bottom:10px;line-height:1.6"><span style="color:var(--az)">Z+</span> または <span style="color:var(--az)">Z−</span> 側の半分を残してミラーコピーし、左右対称に整形します。向き調整後・ホイール指定前に実行してください。</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:6px">
+      <button class="reset-btn" id="mirrorZpBtn" disabled style="font-size:11px;padding:7px 4px"><span class="az">Z+</span> 側でミラー</button>
+      <button class="reset-btn" id="mirrorZmBtn" disabled style="font-size:11px;padding:7px 4px"><span class="az">Z−</span> 側でミラー</button>
+    </div>
+    <div id="mirrorUndoRow" style="display:none">
+      <button class="reset-btn" id="mirrorUndoBtn" style="width:100%;font-size:11px;padding:7px 4px">↩ ミラー前に戻す</button>
+    </div>
+  </div>
+
+  <div class="section">
+    <div class="sec-title">04 / Wheel Points</div>
     <button class="step-btn" id="btnFront" disabled>
       <span class="num">F</span> 前輪軸をクリック指定
     </button>
@@ -261,7 +273,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
   </div>
 
   <div class="section">
-    <div class="sec-title">04 / Target Dimensions</div>
+    <div class="sec-title">05 / Target Dimensions</div>
     <div class="inp-group">
       <label>ホイールベース (X軸)</label>
       <div class="inp-row">
@@ -305,7 +317,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
   </div>
 
   <div class="section">
-    <div class="sec-title">05 / Export</div>
+    <div class="sec-title">06 / Export</div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:10px">
       <input type="checkbox" id="ghostCheck" checked style="accent-color:var(--accent);width:14px;height:14px">
       元モデルをゴースト表示
@@ -314,7 +326,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
   </div>
 
   <div class="section">
-    <div class="sec-title">06 / Interior Box</div>
+    <div class="sec-title">07 / Interior Box</div>
     <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--dim);cursor:pointer;margin-bottom:12px">
       <input type="checkbox" id="boxCheck" style="accent-color:var(--warning);width:14px;height:14px">
       内部空間ボックスを表示
@@ -346,7 +358,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
   </div>
 
   <div class="section">
-    <div class="sec-title">07 / Shell Thickness</div>
+    <div class="sec-title">08 / Shell Thickness</div>
     <div class="inp-group">
       <label>手法</label>
       <select id="shellMethod" style="width:100%;background:var(--bg);border:1px solid var(--border);color:var(--text);padding:7px 10px;font-family:'Share Tech Mono',monospace;font-size:11px;outline:none">
@@ -509,6 +521,7 @@ let scaledGeo   = null;
 let shellGeo    = null;
 let appliedScales = null;  // applyScale() 実行時の { sx, sy, sz } を保持
 let rotMatrix   = new THREE.Matrix4();
+let preMirrorState = null;  // ミラー前の { originalGeo, rotMatrix } を保存してアンドゥに使用
 let scene, renderer, mainMesh, scaledMesh, shellMesh;
 let tireCylinderMeshes = [];  // タイヤ穴くり抜き可視化用シリンダーメッシュ群
 let perspCamera, orthoCamera;
@@ -796,14 +809,18 @@ function parseASC(text) {
 function loadSTL(buf) {
   originalGeo = parseSTL(buf);
   rotMatrix   = new THREE.Matrix4();
+  preMirrorState = null;
   wheels.front=null; wheels.rear=null;
   if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
   document.getElementById('shellResetBtn').style.display='none';
+  document.getElementById('mirrorUndoRow').style.display='none';
   rebuildMesh(originalGeo.clone());
   enableOrient(true);
   document.getElementById('btnFront').disabled=false;
   document.getElementById('btnRear').disabled=false;
   document.getElementById('shellBtn').disabled=false;
+  document.getElementById('mirrorZpBtn').disabled=false;
+  document.getElementById('mirrorZmBtn').disabled=false;
   document.getElementById('fileInfo').style.display='block';
   setMsg('02: 右下の矢印を参考に進行方向=X、車高=Y になるよう回転ボタンで調整してください');
 }
@@ -855,6 +872,101 @@ function rotateModel(axis,deg) {
   document.getElementById('applyBtn').disabled=true;
   rebuildMesh(ng);
 }
+
+// ── Z軸ミラー対称化 ─────────────────────────────────────────────
+// keepSide: 'zp' = Z+側を残す / 'zm' = Z-側を残す
+// bbox中心Z で分割し、残した半分をZ軸ミラーコピーして対称形状を生成する。
+// ミラー後は originalGeo・rotMatrix をリセットして回転ボタンが引き続き使えるようにする。
+function mirrorHalf(keepSide) {
+  if (!currentGeo) return;
+
+  // ミラー前の状態を保存（アンドゥ用）
+  preMirrorState = { originalGeo: originalGeo.clone(), rotMatrix: rotMatrix.clone() };
+
+  currentGeo.computeBoundingBox();
+  const bbox = currentGeo.boundingBox;
+  const centerZ = (bbox.max.z + bbox.min.z) / 2;
+
+  const pos = currentGeo.attributes.position.array;
+  const nor = currentGeo.attributes.normal.array;
+  const newPos = [], newNor = [];
+
+  for (let i = 0; i < pos.length; i += 9) {
+    const cz = (pos[i+2] + pos[i+5] + pos[i+8]) / 3;
+    const keep = keepSide === 'zp' ? cz >= centerZ : cz <= centerZ;
+    if (!keep) continue;
+
+    // 元の三角形をそのままコピー
+    for (let j = 0; j < 9; j++) { newPos.push(pos[i+j]); newNor.push(nor[i+j]); }
+
+    // ミラーコピー: Z を centerZ 中心に反転、巻き方向を逆 (v0,v2,v1) にして法線を保持
+    const mz = z => 2 * centerZ - z;
+    newPos.push(
+      pos[i],   pos[i+1], mz(pos[i+2]),   // v0
+      pos[i+6], pos[i+7], mz(pos[i+8]),   // v2
+      pos[i+3], pos[i+4], mz(pos[i+5]),   // v1
+    );
+    newNor.push(
+      nor[i],   nor[i+1], -nor[i+2],
+      nor[i+6], nor[i+7], -nor[i+8],
+      nor[i+3], nor[i+4], -nor[i+5],
+    );
+  }
+
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(newPos), 3));
+  newGeo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(newNor), 3));
+
+  // ミラー済み形状を新たな原形として登録 → 回転ボタンが引き続き動作する
+  originalGeo = newGeo.clone();
+  rotMatrix   = new THREE.Matrix4();
+
+  // ホイール・スケール・シェルをリセット
+  wheels.front = null; wheels.rear = null;
+  removeMarker('front'); removeMarker('rear');
+  removeTireCylinders();
+  scaledGeo = null; appliedScales = null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; } shellGeo = null;
+  document.getElementById('shellResetBtn').style.display = 'none';
+  document.getElementById('dlBtn').disabled  = true;
+  document.getElementById('applyBtn').disabled = true;
+  updateWheelUI();
+
+  document.getElementById('mirrorUndoRow').style.display = 'block';
+
+  const triCount = newPos.length / 9;
+  rebuildMesh(newGeo);
+  setMsg(`✓ ミラー完了 (${keepSide === 'zp' ? 'Z+' : 'Z−'} 側基準) — ${triCount.toLocaleString()} 三角形 / ホイール位置を再設定してください`);
+}
+
+function undoMirror() {
+  if (!preMirrorState) return;
+
+  originalGeo = preMirrorState.originalGeo;
+  rotMatrix   = preMirrorState.rotMatrix;
+  preMirrorState = null;
+
+  // ホイール・スケール・シェルをリセット
+  wheels.front = null; wheels.rear = null;
+  removeMarker('front'); removeMarker('rear');
+  removeTireCylinders();
+  scaledGeo = null; appliedScales = null;
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; } shellGeo = null;
+  document.getElementById('shellResetBtn').style.display = 'none';
+  document.getElementById('dlBtn').disabled  = true;
+  document.getElementById('applyBtn').disabled = true;
+  updateWheelUI();
+
+  document.getElementById('mirrorUndoRow').style.display = 'none';
+
+  const ng = originalGeo.clone(); ng.applyMatrix4(rotMatrix);
+  rebuildMesh(ng);
+  setMsg('↩ ミラー前に戻しました');
+}
+
+document.getElementById('mirrorZpBtn').addEventListener('click', () => mirrorHalf('zp'));
+document.getElementById('mirrorZmBtn').addEventListener('click', () => mirrorHalf('zm'));
+document.getElementById('mirrorUndoBtn').addEventListener('click', undoMirror);
 
 // bind rotation buttons
 ['x','y','z'].forEach(ax=>{
@@ -2208,30 +2320,32 @@ async function applyShell() {
   const thk = parseFloat(document.getElementById('shellThk').value);
   if (isNaN(thk) || thk <= 0) { setMsg('肉厚に正の値を入力してください'); return; }
 
-  // ── タイヤ穴くり抜き（スケール前のオリジナル座標で処理）──────
-  // カット半径 = タイヤ半径 + クリアランス + 肉厚（すべてスケール後の実寸 mm）
-  // スケーリング適用済みの場合は sy で割り戻してプレスケール座標のカット半径に変換する
+  // ── タイヤ穴くり抜き ─────────────────────────────────────────
+  // スケール適用済みの場合はスケール後のジオメトリ（scaledGeo）に直接カットする。
+  // ホイール座標もスケール後の実寸に変換することで、カット円が楕円化するのを防ぐ。
+  // スケール未適用の場合は currentGeo をそのまま使用する。
   let src;
-  if (document.getElementById('shellCutTire').checked && wheels.front && wheels.rear && currentGeo) {
+  if (document.getElementById('shellCutTire').checked && wheels.front && wheels.rear) {
     const cutTireR  = parseFloat(document.getElementById('cutTireR').value)       || 30;
     const clearance = parseFloat(document.getElementById('tireClearance').value) || 2;
-    const cutRPost = cutTireR + clearance + thk;  // スケール後の実寸カット半径
-    // プレスケール座標でのカット半径: sy で割り戻す（Y方向スケールを基準）
-    const scaleFactor = appliedScales ? appliedScales.sy : 1;
-    const cutR = cutRPost / scaleFactor;
+    const cutR = cutTireR + clearance + thk;  // スケール後の実寸カット半径
     const r2 = cutR * cutR;
-    await yld('タイヤ穴をくり抜き中（スケール前）...');
-    let cutGeo = cutTireFaces(currentGeo, [
-      { wx: wheels.front.x, wy: wheels.front.y, r2 },
-      { wx: wheels.rear.x,  wy: wheels.rear.y,  r2 },
-    ]);
-    if (appliedScales) {
-      const { sx, sy, sz } = appliedScales;
-      cutGeo.applyMatrix4(new THREE.Matrix4().makeScale(sx, sy, sz));
-      cutGeo.computeBoundingBox();
-      cutGeo.computeVertexNormals();
+    if (appliedScales && scaledGeo) {
+      // スケール後座標でカット: ホイール位置を sx/sy でスケール変換
+      const { sx, sy } = appliedScales;
+      await yld('タイヤ穴をくり抜き中（スケール後）...');
+      src = cutTireFaces(scaledGeo, [
+        { wx: wheels.front.x * sx, wy: wheels.front.y * sy, r2 },
+        { wx: wheels.rear.x  * sx, wy: wheels.rear.y  * sy, r2 },
+      ]);
+    } else {
+      // スケール未適用: currentGeo をそのままカット
+      await yld('タイヤ穴をくり抜き中...');
+      src = cutTireFaces(currentGeo, [
+        { wx: wheels.front.x, wy: wheels.front.y, r2 },
+        { wx: wheels.rear.x,  wy: wheels.rear.y,  r2 },
+      ]);
     }
-    src = cutGeo;
   } else {
     src = scaledGeo || currentGeo;
   }
