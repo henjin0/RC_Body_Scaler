@@ -879,13 +879,17 @@ function parseASC(text) {
 // ── Load ───────────────────────────────────────────────────────
 function loadSTL(buf) {
   originalGeo = parseSTL(buf);
-  rotMatrix   = new THREE.Matrix4();
+  // Meshy（生成AI）の座標系をデフォルトで補正: X+90°×3 + Y+90°×2
+  rotMatrix = new THREE.Matrix4()
+    .premultiply(new THREE.Matrix4().makeRotationX(Math.PI * 3 / 2))
+    .premultiply(new THREE.Matrix4().makeRotationY(Math.PI));
   preMirrorState = null;
   wheels.front=null; wheels.rear=null;
   if (shellMesh) { scene.remove(shellMesh); shellMesh=null; } shellGeo=null;
   document.getElementById('shellResetBtn').style.display='none';
   document.getElementById('mirrorUndoRow').style.display='none';
-  rebuildMesh(originalGeo.clone());
+  const ng = originalGeo.clone(); ng.applyMatrix4(rotMatrix);
+  rebuildMesh(ng);
   enableOrient(true);
   document.getElementById('btnFront').disabled=false;
   document.getElementById('btnRear').disabled=false;
