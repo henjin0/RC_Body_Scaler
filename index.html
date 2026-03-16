@@ -659,14 +659,14 @@ function buildTireCylinders() {
       const ry = Math.max(1, parseFloat(document.getElementById('cutTireRy').value) || 30) + clearance + shellThk;
       const SEG = 64;
 
-      // かまぼこ断面: 矩形 (Y 0→ry) + 上部半楕円 (中心 Y=ry, 上半分 Y=ry→2ry)
-      // THREE.Shape で断面を定義してZ方向に押し出す
+      // かまぼこ断面: 矩形 (Y -ry→0) + 上部半楕円 (中心 Y=0, 上半分 Y=0→ry)
+      // ローカル座標: Y=0 がホイール中心 (dispY)、矩形が下、半楕円が上
       const shape = new THREE.Shape();
-      shape.moveTo(-rx, 0);
-      shape.lineTo( rx, 0);    // 底辺
-      shape.lineTo( rx, ry);   // 右側面
-      shape.absellipse(0, ry, rx, ry, 0, Math.PI, false);  // 半楕円 (右→上→左)
-      shape.lineTo(-rx, 0);    // 左側面
+      shape.moveTo(-rx, -ry);  // 底左
+      shape.lineTo( rx, -ry);  // 底辺
+      shape.lineTo( rx,   0);  // 右側面 (接線まで)
+      shape.absellipse(0, 0, rx, ry, 0, Math.PI, false);  // 半楕円 (右→上→左)
+      shape.lineTo(-rx, -ry);  // 左側面 + 閉じる
 
       const extGeo = new THREE.ExtrudeGeometry(shape, { depth: zHalf * 2, bevelEnabled: false });
       const mesh = new THREE.Mesh(extGeo, sMat.clone());
@@ -678,22 +678,22 @@ function buildTireCylinders() {
       // 前後端の輪郭ライン (底辺 + 左右側面 + 半楕円)
       for (const z of [-zHalf, zHalf]) {
         const pts = [];
-        pts.push(new THREE.Vector3(dispX - rx, dispY,      z));  // 底左
-        pts.push(new THREE.Vector3(dispX + rx, dispY,      z));  // 底右
-        pts.push(new THREE.Vector3(dispX + rx, dispY + ry, z));  // 矩形右上
+        pts.push(new THREE.Vector3(dispX - rx, dispY - ry, z));  // 底左
+        pts.push(new THREE.Vector3(dispX + rx, dispY - ry, z));  // 底右
+        pts.push(new THREE.Vector3(dispX + rx, dispY,      z));  // 接線右
         for (let i = 0; i <= SEG; i++) {
           const a = (i / SEG) * Math.PI;  // 0→π (右から左, 上半)
-          pts.push(new THREE.Vector3(dispX + Math.cos(a) * rx, dispY + ry + Math.sin(a) * ry, z));
+          pts.push(new THREE.Vector3(dispX + Math.cos(a) * rx, dispY + Math.sin(a) * ry, z));
         }
-        pts.push(new THREE.Vector3(dispX - rx, dispY + ry, z));  // 矩形左上
-        pts.push(new THREE.Vector3(dispX - rx, dispY,      z));  // 底左(閉じる)
+        pts.push(new THREE.Vector3(dispX - rx, dispY,      z));  // 接線左
+        pts.push(new THREE.Vector3(dispX - rx, dispY - ry, z));  // 底左(閉じる)
         const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMat);
         line.renderOrder = 501;
         scene.add(line);
         tireCylinderMeshes.push(line);
       }
-      // 縦方向ライン（底左・底右・矩形左上・矩形右上・頂点）
-      for (const [ax, ay] of [[-rx, 0], [rx, 0], [-rx, ry], [rx, ry], [0, ry * 2]]) {
+      // 縦方向ライン（底左・底右・接線左・接線右・頂点）
+      for (const [ax, ay] of [[-rx, -ry], [rx, -ry], [-rx, 0], [rx, 0], [0, ry]]) {
         const vpts = [
           new THREE.Vector3(dispX + ax, dispY + ay, -zHalf),
           new THREE.Vector3(dispX + ax, dispY + ay,  zHalf),
@@ -2120,10 +2120,11 @@ function cutTireFaces(geo, tireDefs) {
     for (const t of tireDefs) {
       const dx = cx - t.wx, dy = cy - t.wy;
       if (t.rx2 !== undefined) {
-        // かまぼこ型: 矩形部分 (Y∈[0,ry)) + 上部半楕円 (中心 Y=ry, 上半分)
-        if (cy >= 0 && Math.abs(dx) < t.rx && cy < t.ry) { cut = true; break; }  // 矩形
-        const dyE = cy - t.ry;
-        if (cy >= t.ry && dx*dx / t.rx2 + dyE*dyE / t.ry2 < 1) { cut = true; break; }  // 半楕円
+        // かまぼこ型: 矩形部分 (Y∈[wy-ry, wy)) + 上部半楕円 (中心 Y=wy, 上半分)
+        // 矩形と半楕円の境界 (接線) がホイール中心 Y に一致する
+        if (cy >= t.wy - t.ry && cy < t.wy && Math.abs(dx) < t.rx) { cut = true; break; }  // 矩形
+        const dyE = cy - t.wy;
+        if (dyE >= 0 && dx*dx / t.rx2 + dyE*dyE / t.ry2 < 1) { cut = true; break; }  // 半楕円
       } else {
         if (dx*dx + dy*dy < t.r2) { cut = true; break; }
       }
