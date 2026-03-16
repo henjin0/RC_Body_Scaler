@@ -150,7 +150,11 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 | 面フィルタ | `shellFilter` | `none` / `outward` / `raycast` |
 | スムージング回数 | `shellSmooth` | 0 = 無効、1〜200 = ラプラシアン反復回数 |
 | 部位カラー表示 | `shellColorize` | チェック時、外面=シアン / 内面=グリーン / 底面リング=オレンジ で頂点カラーを付与 |
-| タイヤ穴くり抜き | `shellCutTire` | チェック時、前輪・後輪それぞれ Z 方向全貫通シリンダー 2 本でシェルから除去（左右対称のため 2 本で 4 タイヤをまとめて処理） |
+| タイヤ穴くり抜き | `shellCutTire` | チェック時、前輪・後輪それぞれ Z 方向全貫通でシェルから除去（左右対称のため 2 本で 4 タイヤをまとめて処理） |
+| 穴の形状 | `cutTireShape` | `circle`（円形）/ `kamaboko`（かまぼこ型 D形） |
+| タイヤ半径（円形） | `cutTireR` | 円形モード時のカット半径（スケール後実寸）、デフォルト 30mm |
+| 横半径 RX（かまぼこ） | `cutTireRx` | ホイール中心からの水平距離、デフォルト 30mm |
+| 縦半径 RY（かまぼこ） | `cutTireRy` | 矩形部の高さ ＝ 半楕円の垂直半軸、デフォルト 30mm |
 | クリアランス | `tireClearance` | タイヤ半径に加算する余裕代（デフォルト 2mm） |
 | カット範囲制限 | `shellClipRange` | チェック時、6方向それぞれの最大到達距離を % で制限（100=制限なし） |
 
@@ -160,8 +164,32 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 
 - ホイール座標をスケール後実寸に変換: `wx = wheels.x × sx`、`wy = wheels.y × sy`
 - カット半径はそのまま実寸で使用（割り戻し不要）
-- これにより XZ スケール比が 1:1 でない場合でも穴が真円を保つ
+- これにより XZ スケール比が 1:1 でない場合でも穴が真円/真D形を保つ
 - スケール未適用の場合は `currentGeo` に対してそのまま適用
+
+**穴の形状: 円形（`circle`）**
+
+- 判定: `(cx-wx)² + (cy-wy)² < (cutTireR + clearance + thk)²`（Z 方向は全貫通）
+- 可視化: `THREE.CylinderGeometry`（半透明オレンジ円筒）
+
+**穴の形状: かまぼこ型（`kamaboko`）**
+
+断面 = 矩形（下部） + 半楕円（上部）。ホイール中心 Y（`wy`）が矩形と半楕円の接線になる。
+
+```
+        (0, wy+ry)          ← 楕円頂点
+       /           \
+(-rx, wy) -------- (rx, wy) ← 接線（ホイール中心 Y）
+      |               |
+(-rx, wy-ry) ---- (rx, wy-ry) ← 底辺
+```
+
+| 部位 | Y 範囲 | 判定 |
+|------|--------|------|
+| 矩形 | `wy-ry ≤ cy < wy` | `\|cx-wx\| < rx` |
+| 半楕円 | `cy ≥ wy` | `(cx-wx)²/rx² + (cy-wy)²/ry² < 1` |
+
+- 可視化: `THREE.Shape`（矩形+半楕円断面）+ `ExtrudeGeometry` でZ方向押し出し
 
 **カット範囲制限（`shellClipRange`）**
 
@@ -317,7 +345,7 @@ const THEME = {
 | `laplacianSmooth(uniqueVerts, faces, iterations)` | 隣接平均によるラプラシアンスムージング、抽象化頂点配列を返す |
 | `buildShellGeo(uniqueVerts, faces, thickness, normVerts)` | 法線オフセット方式でシェルジオメトリを生成 |
 | `buildShellGeoScale(uniqueVerts, faces, thickness, normVerts)` | スケールシェル方式でシェルジオメトリを生成 |
-| `cutTireFaces(geo, tireDefs)` | Z方向全貫通シリンダーのXY距離判定で面を除去してタイヤ穴を作成。`tireDefs`: `[{wx,wy,r2}]` |
+| `cutTireFaces(geo, tireDefs)` | Z方向全貫通でタイヤ穴を作成。円形: `tireDefs[i] = {wx,wy,r2}`、かまぼこ型: `{wx,wy,rx,ry,rx2,ry2}` |
 | `clipBodyByRange(geo, ranges)` | 各軸6方向のクリップ平面で三角形を除去。`ranges`: `{xp,xm,yp,ym,zp,zm}`（各値 0〜100%）。バウンディングボックス最大値×割合をクリップ平面として使用 |
 | `buildShellGeoHollow(uniqueVerts, faces, thickness, normVerts, withColors)` | クローズドホロー方式。閉じたソリッドを中空化。壁ストリップなし。`withColors=true` で部位別頂点カラーを付与。`g._boundaryCount` で境界エッジ数を返す |
 | `buildShellGeoSolidCap(uniqueVerts, faces, thickness, normVerts, withColors)` | ソリッドキャップ方式。境界YクランプによりスライサーのB層誤検知を解消。`withColors=true` で部位別頂点カラーを付与 |
