@@ -6,6 +6,10 @@
 
 ---
 
+## WebアプリのURL
+
+https://henjin0.github.io/RC_Body_Scaler/
+
 ## 基本的な使い方
 
 右パネルの手順に従って操作します。
