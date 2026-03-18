@@ -157,6 +157,7 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 | 横半径 RX（かまぼこ） | `cutTireRx` | ホイール中心からの水平距離、デフォルト 30mm |
 | 縦半径 RY（かまぼこ） | `cutTireRy` | 矩形部の高さ ＝ 半楕円の垂直半軸、デフォルト 30mm |
 | クリアランス | `tireClearance` | タイヤ半径に加算する余裕代（デフォルト 2mm） |
+| 肉厚を加算 | `cutAddThk` | チェック時、カット半径にシェル肉厚を加算する（デフォルト OFF）。OFF 時: カット半径 = 指定値 + クリアランス。ON 時: カット半径 = 指定値 + クリアランス + 肉厚 |
 | カット範囲制限 | `shellClipRange` | チェック時、6方向それぞれの最大到達距離を % で制限（100=制限なし） |
 
 **タイヤ穴くり抜きの座標系**
@@ -170,7 +171,7 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 
 **穴の形状: 円形（`circle`）**
 
-- 判定: `(cx-wx)² + (cy-wy)² < (cutTireR + clearance + thk)²`（Z 方向は全貫通）
+- 判定: `(cx-wx)² + (cy-wy)² < (cutTireR + clearance [+ thk])²`（Z 方向は全貫通、`cutAddThk` チェック時のみ `+thk`）
 - 可視化: `THREE.CylinderGeometry`（半透明オレンジ円筒）
 
 **穴の形状: かまぼこ型（`kamaboko`）**
@@ -190,6 +191,7 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 | 矩形 | `wy-ry ≤ cy < wy` | `\|cx-wx\| < rx` |
 | 半楕円 | `cy ≥ wy` | `(cx-wx)²/rx² + (cy-wy)²/ry² < 1` |
 
+- `rx`, `ry` の実効値: `cutTireRx/Ry + clearance [+ thk]`（`cutAddThk` チェック時のみ `+thk`）
 - 可視化: `THREE.Shape`（矩形+半楕円断面）+ `ExtrudeGeometry` でZ方向押し出し
 
 **カット範囲制限（`shellClipRange`）**

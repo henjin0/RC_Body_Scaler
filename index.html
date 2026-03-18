@@ -402,7 +402,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     </div>
     <div class="inp-group" style="display:flex;align-items:center;gap:8px;padding:4px 0">
       <input type="checkbox" id="shellCutTire" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent2);cursor:pointer">
-      <label for="shellCutTire" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">タイヤ穴をくり抜く<br><span style="color:var(--dim)">カット半径 = タイヤ半径 + クリアランス + 肉厚 — オレンジ円筒で可視化</span></label>
+      <label for="shellCutTire" style="margin:0;cursor:pointer;font-size:11px;line-height:1.5">タイヤ穴をくり抜く<br><span style="color:var(--dim)">カット半径 = タイヤ半径 + クリアランス — オレンジ円筒で可視化</span></label>
     </div>
     <div id="tireCutPanel" style="display:none;margin-left:22px;margin-bottom:6px">
       <div class="inp-group">
@@ -444,6 +444,10 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
           <input type="number" id="tireClearance" placeholder="例: 2" step="0.5" min="0" value="2">
           <span class="unit">mm</span>
         </div>
+      </div>
+      <div class="inp-group" style="display:flex;align-items:center;gap:6px;padding:2px 0">
+        <input type="checkbox" id="cutAddThk" style="width:14px;height:14px;flex-shrink:0;accent-color:var(--accent2);cursor:pointer">
+        <label for="cutAddThk" style="margin:0;cursor:pointer;font-size:11px">シェル肉厚もカット半径に加算する<br><span style="color:var(--dim)">チェック時: カット半径 = 指定値 + クリアランス + 肉厚</span></label>
       </div>
     </div>
     <div class="inp-group" style="display:flex;align-items:center;gap:8px;padding:4px 0">
@@ -633,7 +637,9 @@ function buildTireCylinders() {
 
   const tireShape  = document.getElementById('cutTireShape').value;
   const clearance  = Math.max(0, parseFloat(document.getElementById('tireClearance').value) || 2);
-  const shellThk   = Math.max(0, parseFloat(document.getElementById('shellThk').value)      || 0);
+  const shellThk   = document.getElementById('cutAddThk').checked
+                     ? Math.max(0, parseFloat(document.getElementById('shellThk').value) || 0)
+                     : 0;
 
   // スケール係数（未適用なら 1）
   const sc = appliedScales || { sx: 1, sy: 1, sz: 1 };
@@ -2452,11 +2458,12 @@ async function applyShell() {
   if (document.getElementById('shellCutTire').checked && wheels.front && wheels.rear) {
     const tireShape = document.getElementById('cutTireShape').value;
     const clearance = parseFloat(document.getElementById('tireClearance').value) || 2;
+    const addThk    = document.getElementById('cutAddThk').checked ? thk : 0;
 
     let tireDefs;
     if (tireShape === 'kamaboko') {
-      const rx  = (parseFloat(document.getElementById('cutTireRx').value) || 30) + clearance + thk;
-      const ry  = (parseFloat(document.getElementById('cutTireRy').value) || 30) + clearance + thk;
+      const rx  = (parseFloat(document.getElementById('cutTireRx').value) || 30) + clearance + addThk;
+      const ry  = (parseFloat(document.getElementById('cutTireRy').value) || 30) + clearance + addThk;
       const rx2 = rx * rx, ry2 = ry * ry;
       if (appliedScales && scaledGeo) {
         const { sx, sy } = appliedScales;
@@ -2472,7 +2479,7 @@ async function applyShell() {
       }
     } else {
       const cutTireR = parseFloat(document.getElementById('cutTireR').value) || 30;
-      const cutR = cutTireR + clearance + thk;
+      const cutR = cutTireR + clearance + addThk;
       const r2 = cutR * cutR;
       if (appliedScales && scaledGeo) {
         const { sx, sy } = appliedScales;
@@ -2756,7 +2763,8 @@ document.getElementById('cutTireShape').addEventListener('change', function() {
 document.getElementById('cutTireR').addEventListener('input',    () => buildTireCylinders());
 document.getElementById('cutTireRx').addEventListener('input',   () => buildTireCylinders());
 document.getElementById('cutTireRy').addEventListener('input',   () => buildTireCylinders());
-document.getElementById('tireClearance').addEventListener('input', () => buildTireCylinders());
+document.getElementById('tireClearance').addEventListener('input',  () => buildTireCylinders());
+document.getElementById('cutAddThk').addEventListener('change',      () => buildTireCylinders());
 document.getElementById('shellThk').addEventListener('input',      () => buildTireCylinders());
 
 function setMsg(t){ document.getElementById('stepHint').textContent=t; }
