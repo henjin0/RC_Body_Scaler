@@ -127,6 +127,63 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 - スケールバー（赤=X・緑=Y・青=Z）でリアルタイムプレビュー
 - 「▶ スケール適用」ボタン
 
+**ホイールアーチ局所変形（スケール適用後に表示、オプション機能）**
+
+スケール適用後に `archDeformBlock` が展開される。チェックボックス `archDeformEnabled` を ON にすると操作UIが表示され、同時にグリーン・黄色の可視化円も描画される。OFF の場合は入力欄・可視化ともに非表示。
+
+▶ アーチ変形 ボタンは累積適用される。クリックのたびに各頂点が目標半径へ段階的に近づく（1クリックで完全に到達するわけではない）。
+
+| UI 要素 | ID | 説明 |
+|--------|----|------|
+| ホイールアーチ局所変形（オプション） | `archDeformEnabled` | チェック時のみ操作UIと可視化円（グリーン・黄色）を表示 |
+| 影響半径 | `archInfluence` | ホイール中心から何 mm 以内の頂点を変形するか（デフォルト 20mm）。**グリーン円**で可視化 |
+| 目標アーチ半径 | `archTargetRadius` | 変形後にアーチがホイール中心から何 mm の位置になるかの目標値（デフォルト 15mm）。**黄色円**で可視化 |
+| 縮小方向にも変形する | `archShrinkEnabled` | OFF（デフォルト）: push-only（拡大のみ）。ON: pull-only（縮小のみ、溝部分を引き込む） |
+| ▶ アーチ変形 | `archApplyBtn` | 変形を累積適用。クリックごとに目標半径へ段階的に近づく |
+| ↩ 戻す | `archUndoBtn` | 最初の適用前の `scaledGeo` に戻す（1段階 undo） |
+| ポリゴン細分化 | `subdivEnabled` | チェック時のみ細分化オプションを表示（デフォルト：非表示、オプション機能） |
+| 最大辺長 | `subdivMaxEdge` | この長さ (mm) を超える辺を持つ三角形を 4 分割（デフォルト 3mm）。`subdivBtn` で実行 |
+
+**アルゴリズム**
+
+各頂点について、前輪・後輪それぞれのホイール中心からの XY 平面距離 `d` を計算する。
+より大きな weight を持つホイールを選択し、半径方向（Z 不変）に移動する。
+
+```
+weight  = max(0, (1 - d / influence))²                       ← 二乗 falloff（境界が滑らか）
+
+[shrinkEnabled OFF — 拡大モード]
+delta   = max(0, targetRadius - d)   ← push-only: d < targetRadius の頂点のみ外へ押し出し
+
+[shrinkEnabled ON — 縮小モード]
+delta   = min(0, targetRadius - d)   ← pull-only: d > targetRadius の頂点のみ内へ引き込み
+
+new_d   = d + delta × weight
+vertex.x = wx + (dx/d) × new_d
+vertex.y = wy + (dy/d) × new_d
+vertex.z 変化なし
+```
+
+- **拡大モード（デフォルト）**: `d < targetRadius` の頂点のみ外側へ押し出し。外側は不変
+- **縮小モード（オプション）**: `d > targetRadius` の頂点のみ内側へ引き込み（溝・アーチ外縁を縮小）。内側は不変
+- `d = targetRadius` 付近は weight × delta が 0 に近づくため滑らかに変化
+- `d ≥ influence` の頂点は変化なし（影響範囲外）
+- スケール適用済みの場合、ホイール座標を `wheels.x × sx`、`wheels.y × sy` で変換してから使用
+- 変形結果は `scaledGeo` を差し替えて保存（`shellGeo` は無効化）
+- `preArchDeformGeo` に変形前の `scaledGeo` をバックアップ（最初の適用時のみ保存）
+
+**可視化（`buildArchDeformViz`）**
+
+スケール適用後に `archDeformBlock` が表示されている間、各ホイール中心に２種類の円筒を描画する。
+
+| 色 | 意味 | 半径 |
+|----|------|------|
+| グリーン | 影響範囲（ここまでの頂点が変形対象） | `archInfluence` |
+| 黄色 | 目標アーチ半径（変形後の到達目標） | `archTargetRadius` |
+
+- 入力値変更でリアルタイム更新
+- `removeArchDeformViz()` でシーンからクリア（`rebuildMesh` 時など）
+
 ### 06 / Export
 - ゴースト表示チェック: スケール適用後に元モデルを opacity 0.18 の半透明で表示/非表示
 - 「⬇ STLをダウンロード」でバイナリ STL（`rc_body_scaled.stl`）を保存
@@ -355,6 +412,12 @@ const THEME = {
 | `applyShell()` | シェル生成パイプライン全体を async で実行（進捗表示付き） |
 | `applyShellPostSmooth()` | 生成済みシェルを後スムージング。完了後 vertexColors をリセットしてテーマ色を再適用 |
 | `resetShell()` | shellMesh/shellGeo を破棄し元メッシュを再表示 |
+| `applyArchDeform()` | ホイールアーチ周辺を局所的に XY 平面上で放射状押し出し変形（push-only）。`scaledGeo` を更新 |
+| `resetArchDeform()` | `preArchDeformGeo` から変形前の `scaledGeo` を復元（1段階 undo） |
+| `buildArchDeformViz()` | 影響範囲（グリーン円筒）と目標アーチ半径（黄色円筒）をシーンに描画 |
+| `removeArchDeformViz()` | アーチ変形可視化メッシュをシーンから削除・dispose |
+| `subdivideGeoByEdge(geo, maxEdge, maxIter)` | maxEdge を超える辺を持つ三角形を 4 分割。非インデックス BufferGeometry を返す |
+| `applySubdivide()` | `subdivBtn` から呼び出し。`scaledGeo` を細分化して `scaledMesh` を再構築 |
 
 ---
 
@@ -369,7 +432,8 @@ let currentGeo     = null;   // 作業中ジオメトリ（センタリング済
 let scaledGeo      = null;   // スケール適用済みジオメトリ
 let shellGeo       = null;   // シェル生成済みジオメトリ
 let rotMatrix      = new THREE.Matrix4();  // 累積回転行列
-let preMirrorState = null;   // ミラー前の { originalGeo, rotMatrix }（アンドゥ用）
+let preMirrorState   = null;   // ミラー前の { originalGeo, rotMatrix }（アンドゥ用）
+let preArchDeformGeo = null;   // アーチ局所変形前の scaledGeo バックアップ（アンドゥ用）
 let appliedScales  = null;   // applyScale() 実行時の { sx, sy, sz }
 let pickMode  = null;        // 'front' | 'rear' | null  ※確定時に必ず null にリセット
 let activeAdj = null;        // 'front' | 'rear' | null

@@ -314,6 +314,57 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
     </div>
     <button class="apply-btn" id="applyBtn" disabled>▶ スケール適用</button>
     <button class="reset-btn" id="resetBtn">リセット</button>
+    <div id="archDeformBlock" style="display:none;margin-top:10px;border-top:1px solid var(--border);padding-top:8px">
+      <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-bottom:4px">
+        <input type="checkbox" id="archDeformEnabled" style="width:13px;height:13px;accent-color:var(--accent);cursor:pointer">
+        ▸ ホイールアーチ局所変形（オプション）
+      </label>
+      <div id="archDeformOptions" style="display:none">
+        <div class="inp-group">
+          <label>影響半径 (mm) <span style="color:#44ff44;font-size:10px">● グリーン円</span></label>
+          <div class="inp-row">
+            <input type="number" id="archInfluence" value="20" step="1" min="1">
+            <span class="unit">mm</span>
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px">この半径内の頂点が変形対象</div>
+        </div>
+        <div class="inp-group">
+          <label>目標アーチ半径 (mm) <span style="color:#ffeb3b;font-size:10px">● 黄色円</span></label>
+          <div class="inp-row">
+            <input type="number" id="archTargetRadius" value="15" step="0.5" min="0.5">
+            <span class="unit">mm</span>
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px">ホイール中心からアーチを変形させたい距離</div>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:4px">
+          <input type="checkbox" id="archShrinkEnabled" style="width:13px;height:13px;accent-color:var(--accent2);cursor:pointer">
+          縮小方向にも変形する
+        </label>
+        <div style="font-size:10px;color:var(--dim);margin-top:2px">OFF: 内側の頂点を外へ押し出し（拡大）　ON: 外側の頂点を内へ引き込み（縮小）</div>
+        <div style="display:flex;gap:6px;margin-top:6px">
+          <button id="archApplyBtn" class="apply-btn" style="flex:1">▶ アーチ変形</button>
+          <button id="archUndoBtn"  class="reset-btn" style="display:none;flex:1">↩ 戻す</button>
+        </div>
+        <div style="font-size:10px;color:var(--dim);margin-top:4px">※ クリックのたびに目標半径へ段階的に近づきます。繰り返し適用可。</div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:6px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
+            <input type="checkbox" id="subdivEnabled" style="width:13px;height:13px;accent-color:var(--accent2);cursor:pointer">
+            ポリゴン細分化（オプション）
+          </label>
+          <div id="subdivOptions" style="display:none;margin-top:6px">
+            <div class="inp-group" style="margin-bottom:4px">
+              <label>最大辺長 (mm)</label>
+              <div class="inp-row">
+                <input type="number" id="subdivMaxEdge" value="3" step="0.5" min="0.5">
+                <span class="unit">mm</span>
+              </div>
+              <div style="font-size:10px;color:var(--dim);margin-top:2px">この長さを超える辺を持つ三角形を4分割</div>
+            </div>
+            <button id="subdivBtn" class="apply-btn" style="width:100%">▶ 細分化実行</button>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="section">
@@ -550,9 +601,11 @@ let scaledGeo   = null;
 let shellGeo    = null;
 let appliedScales = null;  // applyScale() 実行時の { sx, sy, sz } を保持
 let rotMatrix   = new THREE.Matrix4();
-let preMirrorState = null;  // ミラー前の { originalGeo, rotMatrix } を保存してアンドゥに使用
+let preMirrorState   = null;  // ミラー前の { originalGeo, rotMatrix } を保存してアンドゥに使用
+let preArchDeformGeo = null;  // アーチ局所変形前の scaledGeo バックアップ（アンドゥ用）
 let scene, renderer, mainMesh, scaledMesh, shellMesh;
-let tireCylinderMeshes = [];  // タイヤ穴くり抜き可視化用シリンダーメッシュ群
+let tireCylinderMeshes  = [];  // タイヤ穴くり抜き可視化用シリンダーメッシュ群
+let archDeformVizMeshes = [];  // アーチ局所変形可視化用メッシュ群
 let perspCamera, orthoCamera;
 let camera; // active camera
 let useOrtho = false;
@@ -626,6 +679,126 @@ document.getElementById('tireR').addEventListener('input', () => {
   ['front','rear'].forEach(w => { if (wheels[w]) buildMarker(w); });
   buildTireCylinders();
 });
+
+// ── アーチ局所変形 可視化 ────────────────────────────────────────
+// シアン円: 影響範囲（influence radius）
+// 黄色円: 目標アーチ半径（target arch radius）
+function removeArchDeformViz() {
+  archDeformVizMeshes.forEach(m => {
+    scene.remove(m);
+    if (m.geometry) m.geometry.dispose();
+    if (m.material)  m.material.dispose();
+  });
+  archDeformVizMeshes = [];
+}
+
+function buildArchDeformViz() {
+  removeArchDeformViz();
+  const abd = document.getElementById('archDeformBlock');
+  if (!abd || abd.style.display === 'none') return;
+  const enabledCb = document.getElementById('archDeformEnabled');
+  if (!enabledCb || !enabledCb.checked) return;
+  if (!wheels.front && !wheels.rear) return;
+
+  const influence  = parseFloat(document.getElementById('archInfluence').value)    || 20;
+  const targetR    = parseFloat(document.getElementById('archTargetRadius').value) || 15;
+  const sc         = appliedScales || { sx: 1, sy: 1, sz: 1 };
+
+  const refGeo = scaledGeo || currentGeo;
+  let zHalf = 200;
+  if (refGeo?.boundingBox) {
+    const bsz = new THREE.Vector3();
+    refGeo.boundingBox.getSize(bsz);
+    zHalf = bsz.z * 0.5 + 10;
+  }
+
+  const SEG = 48;
+  // シアン: 影響範囲
+  const lMatInf = new THREE.LineBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.85, depthTest: false });
+  const sMatInf = new THREE.MeshBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false });
+  // 黄色: 目標アーチ半径
+  const lMatTgt = new THREE.LineBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.85, depthTest: false });
+  const sMatTgt = new THREE.MeshBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false });
+
+  const addViz = (wx, wy) => {
+    const dispX = wx * sc.sx;
+    const dispY = wy * sc.sy;
+
+    // ── 影響範囲シリンダー（シアン、半透明面 + 前後端ライン + 縦ライン）──
+    const cylInf = new THREE.Mesh(
+      new THREE.CylinderGeometry(influence, influence, zHalf * 2, SEG, 1, true),
+      sMatInf.clone()
+    );
+    cylInf.rotation.x = Math.PI / 2;
+    cylInf.position.set(dispX, dispY, 0);
+    cylInf.renderOrder = 490;
+    scene.add(cylInf);
+    archDeformVizMeshes.push(cylInf);
+
+    for (const z of [-zHalf, zHalf]) {
+      const pts = [];
+      for (let i = 0; i <= SEG; i++) {
+        const a = (i / SEG) * Math.PI * 2;
+        pts.push(new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, z));
+      }
+      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatInf);
+      ln.renderOrder = 491;
+      scene.add(ln);
+      archDeformVizMeshes.push(ln);
+    }
+    // 縦ライン（4方向）
+    for (let i = 0; i < 4; i++) {
+      const a = (i / 4) * Math.PI * 2;
+      const vpts = [
+        new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, -zHalf),
+        new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence,  zHalf),
+      ];
+      const vl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMatInf);
+      vl.renderOrder = 491;
+      scene.add(vl);
+      archDeformVizMeshes.push(vl);
+    }
+
+    // ── 目標アーチ半径シリンダー（黄色、半透明面 + 前後端ライン）──
+    const cylTgt = new THREE.Mesh(
+      new THREE.CylinderGeometry(targetR, targetR, zHalf * 2, SEG, 1, true),
+      sMatTgt.clone()
+    );
+    cylTgt.rotation.x = Math.PI / 2;
+    cylTgt.position.set(dispX, dispY, 0);
+    cylTgt.renderOrder = 492;
+    scene.add(cylTgt);
+    archDeformVizMeshes.push(cylTgt);
+
+    for (const z of [-zHalf, zHalf]) {
+      const pts = [];
+      for (let i = 0; i <= SEG; i++) {
+        const a = (i / SEG) * Math.PI * 2;
+        pts.push(new THREE.Vector3(dispX + Math.cos(a) * targetR, dispY + Math.sin(a) * targetR, z));
+      }
+      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt);
+      ln.renderOrder = 493;
+      scene.add(ln);
+      archDeformVizMeshes.push(ln);
+    }
+    // 目標半径の中心から放射線（ホイール中心 → 目標半径、Z=前後両端の平均）
+    const midZ = 0;
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2;
+      const vpts = [
+        new THREE.Vector3(dispX, dispY, midZ),
+        new THREE.Vector3(dispX + Math.cos(a) * targetR, dispY + Math.sin(a) * targetR, midZ),
+      ];
+      const vl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMatTgt);
+      vl.renderOrder = 493;
+      scene.add(vl);
+      archDeformVizMeshes.push(vl);
+    }
+  };
+
+  if (wheels.front) addViz(wheels.front.x, wheels.front.y);
+  if (wheels.rear)  addViz(wheels.rear.x,  wheels.rear.y);
+}
 
 // ── タイヤくり抜き円筒可視化 ───────────────────────────────────
 // オリジナル座標系（スケール前）で前後輪の切削シリンダーをシーンに表示する。
@@ -928,6 +1101,13 @@ function rebuildMesh(g) {
   const s=new THREE.Vector3(); currentGeo.boundingBox.getSize(s);
   spherical.radius=Math.max(s.x,s.y,s.z)*2.4; syncCamera();
   refreshSizeInfo();
+  // アーチ変形ブロックをリセット
+  preArchDeformGeo = null;
+  removeArchDeformViz();
+  const abd = document.getElementById('archDeformBlock');
+  if (abd) { abd.style.display = 'none'; }
+  const aub = document.getElementById('archUndoBtn');
+  if (aub) { aub.style.display = 'none'; }
 }
 
 // ── Orientation ────────────────────────────────────────────────
@@ -1342,7 +1522,186 @@ document.getElementById('applyBtn').addEventListener('click',()=>{
   setMsg('✓ スケール適用完了 — 半透明=元モデル / 緑=スケール後');
   buildTireCylinders();  // オリジナル座標の円筒可視化を更新（スケール前モデルに対応）
   if (document.getElementById('boxCheck').checked) { applyDefaultBoxSize(); buildInteriorBox(); }
+  // アーチ変形ブロックを表示してアンドゥ状態をリセット
+  document.getElementById('archDeformBlock').style.display = 'block';
+  preArchDeformGeo = null;
+  document.getElementById('archUndoBtn').style.display = 'none';
+  buildArchDeformViz();
 });
+
+// ── Polygon Subdivision by Edge Length ──────────────────────────
+// 非インデックス BufferGeometry（三角形スープ）を受け取り、
+// maxEdge を超える辺を持つ三角形を4分割する。maxIter 回繰り返す。
+function subdivideGeoByEdge(geo, maxEdge, maxIter) {
+  let pos = Array.from(geo.attributes.position.array);
+
+  for (let iter = 0; iter < maxIter; iter++) {
+    let newPos = [];
+    let subdivided = false;
+
+    for (let i = 0; i < pos.length; i += 9) {
+      const ax = pos[i],   ay = pos[i+1], az = pos[i+2];
+      const bx = pos[i+3], by = pos[i+4], bz = pos[i+5];
+      const cx = pos[i+6], cy = pos[i+7], cz = pos[i+8];
+
+      const lenAB = Math.sqrt((bx-ax)**2 + (by-ay)**2 + (bz-az)**2);
+      const lenBC = Math.sqrt((cx-bx)**2 + (cy-by)**2 + (cz-bz)**2);
+      const lenCA = Math.sqrt((ax-cx)**2 + (ay-cy)**2 + (az-cz)**2);
+
+      if (lenAB > maxEdge || lenBC > maxEdge || lenCA > maxEdge) {
+        const mabx = (ax+bx)/2, maby = (ay+by)/2, mabz = (az+bz)/2;
+        const mbcx = (bx+cx)/2, mbcy = (by+cy)/2, mbcz = (bz+cz)/2;
+        const mcax = (cx+ax)/2, mcay = (cy+ay)/2, mcaz = (cz+az)/2;
+        // 4 sub-triangles
+        newPos.push(ax,   ay,   az,   mabx, maby, mabz, mcax, mcay, mcaz);
+        newPos.push(mabx, maby, mabz, bx,   by,   bz,   mbcx, mbcy, mbcz);
+        newPos.push(mcax, mcay, mcaz, mbcx, mbcy, mbcz, cx,   cy,   cz  );
+        newPos.push(mabx, maby, mabz, mbcx, mbcy, mbcz, mcax, mcay, mcaz);
+        subdivided = true;
+      } else {
+        newPos.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+      }
+    }
+
+    pos = newPos;
+    if (!subdivided) break;
+  }
+
+  const newGeo = new THREE.BufferGeometry();
+  newGeo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(pos), 3));
+  newGeo.computeVertexNormals();
+  newGeo.computeBoundingBox();
+  return newGeo;
+}
+
+function applySubdivide() {
+  const baseGeo = scaledGeo || currentGeo;
+  if (!baseGeo) { setMsg('スケール適用後に実行してください'); return; }
+
+  const maxEdge = parseFloat(document.getElementById('subdivMaxEdge').value) || 3;
+  if (maxEdge <= 0) { setMsg('最大辺長に正の値を入力してください'); return; }
+
+  setMsg('⏳ 細分化中...');
+  setTimeout(() => {
+    const prevCount = baseGeo.attributes.position.count / 3;
+    const newGeo = subdivideGeoByEdge(baseGeo, maxEdge, 6);
+    const newCount = newGeo.attributes.position.count / 3;
+
+    scaledGeo = newGeo;
+
+    if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+    shellGeo = null;
+    document.getElementById('shellResetBtn').style.display = 'none';
+
+    if (scaledMesh) scene.remove(scaledMesh);
+    const th = getTheme() ? THEME.light : THEME.dark;
+    const mat = new THREE.MeshPhongMaterial({
+      color:th.scaled.color, specular:th.scaled.specular, shininess:th.scaled.shininess,
+      transparent:true, opacity:0.92, side:THREE.DoubleSide
+    });
+    scaledMesh = new THREE.Mesh(scaledGeo, mat);
+    scene.add(scaledMesh);
+
+    setMsg(`✓ 細分化完了: ${prevCount} → ${newCount} 面`);
+  }, 0);
+}
+
+// ── Wheel Arch Local Deform ─────────────────────────────────────
+function applyArchDeform() {
+  const baseGeo = scaledGeo || currentGeo;
+  if (!baseGeo || !wheels.front || !wheels.rear) { setMsg('スケール適用とホイール指定が必要です'); return; }
+
+  const influence     = parseFloat(document.getElementById('archInfluence').value)    || 20;
+  const targetRadius  = parseFloat(document.getElementById('archTargetRadius').value) || 15;
+  const shrinkEnabled = document.getElementById('archShrinkEnabled').checked;
+  if (targetRadius <= 0) { setMsg('目標アーチ半径に正の値を入力してください'); return; }
+
+  // アンドゥ用バックアップ（累積適用時は最初の状態のみ保持）
+  if (!preArchDeformGeo) preArchDeformGeo = baseGeo.clone();
+
+  const sc = appliedScales || { sx: 1, sy: 1, sz: 1 };
+  const wheelCenters = [
+    { wx: wheels.front.x * sc.sx, wy: wheels.front.y * sc.sy },
+    { wx: wheels.rear.x  * sc.sx, wy: wheels.rear.y  * sc.sy },
+  ];
+
+  const geo = baseGeo.clone();
+  const pos = geo.attributes.position.array;
+
+  for (let i = 0; i < pos.length; i += 3) {
+    let bestWeight = 0, bestWx = 0, bestWy = 0;
+    for (const { wx, wy } of wheelCenters) {
+      const dx = pos[i] - wx, dy = pos[i+1] - wy;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      if (d < influence && d > 0.001) {
+        const t = 1 - d / influence;
+        const w = t * t;
+        if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+      }
+    }
+    if (bestWeight > 0) {
+      const dx = pos[i] - bestWx, dy = pos[i+1] - bestWy;
+      const d = Math.sqrt(dx*dx + dy*dy);
+      // shrinkEnabled OFF: push-only（d < targetRadius の頂点を外へ押し出すのみ）
+      // shrinkEnabled ON : pull-only（d > targetRadius の頂点を内へ引き込むのみ）
+      const delta = shrinkEnabled
+        ? Math.min(0, targetRadius - d)   // pull-only
+        : Math.max(0, targetRadius - d);  // push-only
+      const newD = d + delta * bestWeight;
+      pos[i]   = bestWx + (dx / d) * newD;
+      pos[i+1] = bestWy + (dy / d) * newD;
+    }
+  }
+
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+  geo.computeBoundingBox();
+
+  scaledGeo = geo;
+
+  // shellGeo を無効化
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+  shellGeo = null;
+  document.getElementById('shellResetBtn').style.display = 'none';
+
+  // scaledMesh を更新
+  if (scaledMesh) scene.remove(scaledMesh);
+  const th = getTheme() ? THEME.light : THEME.dark;
+  const mat = new THREE.MeshPhongMaterial({
+    color:th.scaled.color, specular:th.scaled.specular, shininess:th.scaled.shininess,
+    transparent:true, opacity:0.92, side:THREE.DoubleSide
+  });
+  scaledMesh = new THREE.Mesh(scaledGeo, mat);
+  scene.add(scaledMesh);
+
+  document.getElementById('archUndoBtn').style.display = 'block';
+  buildTireCylinders();
+  setMsg('✓ アーチ変形を適用しました');
+}
+
+function resetArchDeform() {
+  if (!preArchDeformGeo) return;
+  scaledGeo = preArchDeformGeo;
+  preArchDeformGeo = null;
+
+  if (shellMesh) { scene.remove(shellMesh); shellMesh = null; }
+  shellGeo = null;
+  document.getElementById('shellResetBtn').style.display = 'none';
+
+  if (scaledMesh) scene.remove(scaledMesh);
+  const th = getTheme() ? THEME.light : THEME.dark;
+  const mat = new THREE.MeshPhongMaterial({
+    color:th.scaled.color, specular:th.scaled.specular, shininess:th.scaled.shininess,
+    transparent:true, opacity:0.92, side:THREE.DoubleSide
+  });
+  scaledMesh = new THREE.Mesh(scaledGeo, mat);
+  scene.add(scaledMesh);
+
+  document.getElementById('archUndoBtn').style.display = 'none';
+  buildTireCylinders();
+  buildArchDeformViz();
+  setMsg('↩ アーチ変形を元に戻しました');
+}
 
 // ── Export ─────────────────────────────────────────────────────
 function toBinarySTL(g) {
@@ -2765,6 +3124,18 @@ document.getElementById('cutTireRx').addEventListener('input',   () => buildTire
 document.getElementById('cutTireRy').addEventListener('input',   () => buildTireCylinders());
 document.getElementById('tireClearance').addEventListener('input',  () => buildTireCylinders());
 document.getElementById('cutAddThk').addEventListener('change',      () => buildTireCylinders());
+document.getElementById('archDeformEnabled').addEventListener('change', function() {
+  document.getElementById('archDeformOptions').style.display = this.checked ? 'block' : 'none';
+  buildArchDeformViz();
+});
+document.getElementById('archApplyBtn').addEventListener('click', applyArchDeform);
+document.getElementById('archUndoBtn').addEventListener('click',  resetArchDeform);
+document.getElementById('archInfluence').addEventListener('input',    () => buildArchDeformViz());
+document.getElementById('archTargetRadius').addEventListener('input', () => buildArchDeformViz());
+document.getElementById('subdivEnabled').addEventListener('change', function() {
+  document.getElementById('subdivOptions').style.display = this.checked ? 'block' : 'none';
+});
+document.getElementById('subdivBtn').addEventListener('click', applySubdivide);
 document.getElementById('shellThk').addEventListener('input',      () => buildTireCylinders());
 
 function setMsg(t){ document.getElementById('stepHint').textContent=t; }
