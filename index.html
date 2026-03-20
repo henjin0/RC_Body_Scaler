@@ -345,15 +345,51 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
           </div>
           <div style="font-size:10px;color:var(--dim);margin-top:2px">この半径内の頂点が変形対象</div>
         </div>
-        <div class="inp-group">
-          <label>目標アーチ半径 (mm) <span style="color:#ffeb3b;font-size:10px">● 黄色円</span></label>
-          <div class="inp-row">
-            <input type="number" id="archTargetRadius" value="15" step="0.5" min="0.5">
+        <!-- モード切替 -->
+        <div style="display:flex;gap:14px;margin-bottom:6px;font-size:11px">
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="radio" name="archMode" id="archModeCircle" checked style="accent-color:var(--accent)"> 円形
+          </label>
+          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+            <input type="radio" name="archMode" id="archModeRect" style="accent-color:var(--accent)"> 矩形
+          </label>
+        </div>
+        <!-- 円形モード専用 -->
+        <div id="archCircleOptions">
+          <div class="inp-group">
+            <label>目標アーチ半径 (mm) <span style="color:#ffeb3b;font-size:10px">● 黄色円</span></label>
+            <div class="inp-row">
+              <input type="number" id="archTargetRadius" value="15" step="0.5" min="0.5">
+              <span class="unit">mm</span>
+            </div>
+            <div style="font-size:10px;color:var(--dim);margin-top:2px">ホイール中心からアーチを変形させたい距離</div>
+          </div>
+        </div>
+        <!-- 矩形モード専用 -->
+        <div id="archRectOptions" style="display:none">
+          <div style="font-size:10px;color:var(--dim);margin-bottom:6px">収束させる軸と目標距離を選択</div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-bottom:3px">
+            <input type="checkbox" id="archRectAxisX" checked style="width:13px;height:13px;accent-color:var(--accent);cursor:pointer">
+            左右方向 (X)
+          </label>
+          <div class="inp-row" style="margin-left:20px;margin-bottom:6px">
+            <label style="font-size:11px;min-width:30px">RX</label>
+            <input type="number" id="archRectRx" value="15" step="0.5" min="0.5">
             <span class="unit">mm</span>
           </div>
-          <div style="font-size:10px;color:var(--dim);margin-top:2px">ホイール中心からアーチを変形させたい距離</div>
+          <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-bottom:3px">
+            <input type="checkbox" id="archRectAxisY" checked style="width:13px;height:13px;accent-color:var(--accent);cursor:pointer">
+            上下方向 (Y)
+          </label>
+          <div class="inp-row" style="margin-left:20px;margin-bottom:4px">
+            <label style="font-size:11px;min-width:30px">RY</label>
+            <input type="number" id="archRectRy" value="20" step="0.5" min="0.5">
+            <span class="unit">mm</span>
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:2px">RX: 左右±距離　RY: ホイール中心Yからの上方距離</div>
         </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:4px">
+        <!-- 共通: 縮小/拡大 -->
+        <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:6px">
           <input type="checkbox" id="archShrinkEnabled" style="width:13px;height:13px;accent-color:var(--accent2);cursor:pointer">
           縮小方向にも変形する
         </label>
@@ -376,7 +412,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
             <button id="archApplyBtn" class="apply-btn" style="flex:1">▶ アーチ変形</button>
             <button id="archUndoBtn"  class="reset-btn" style="display:none;flex:1">↩ 戻す</button>
           </div>
-          <div style="font-size:10px;color:var(--dim);margin-top:4px">※ クリックのたびに目標半径へ段階的に近づきます。繰り返し適用可。</div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">※ クリックのたびに目標値へ段階的に近づきます。繰り返し適用可。</div>
         </div>
       </div>
     </div>
@@ -715,8 +751,8 @@ function buildArchDeformViz() {
   if (!enabledCb || !enabledCb.checked) return;
   if (!wheels.front && !wheels.rear) return;
 
-  const influence  = parseFloat(document.getElementById('archInfluence').value)    || 20;
-  const targetR    = parseFloat(document.getElementById('archTargetRadius').value) || 15;
+  const influence  = parseFloat(document.getElementById('archInfluence').value) || 20;
+  const isRect     = document.getElementById('archModeRect').checked;
   const sc         = appliedScales || { sx: 1, sy: 1, sz: 1 };
 
   const refGeo = scaledGeo || currentGeo;
@@ -728,18 +764,28 @@ function buildArchDeformViz() {
   }
 
   const SEG = 48;
-  // シアン: 影響範囲
   const lMatInf = new THREE.LineBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.85, depthTest: false });
   const sMatInf = new THREE.MeshBasicMaterial({ color: 0x44ff44, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false });
-  // 黄色: 目標アーチ半径
   const lMatTgt = new THREE.LineBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.85, depthTest: false });
   const sMatTgt = new THREE.MeshBasicMaterial({ color: 0xffeb3b, transparent: true, opacity: 0.06, side: THREE.DoubleSide, depthWrite: false });
+
+  // ヘルパー: Z方向の縦線を1本追加
+  const addZLine = (x, y, mat, order) => {
+    const vl = new THREE.Line(
+      new THREE.BufferGeometry().setFromPoints([
+        new THREE.Vector3(x, y, -zHalf),
+        new THREE.Vector3(x, y,  zHalf),
+      ]), mat);
+    vl.renderOrder = order;
+    scene.add(vl);
+    archDeformVizMeshes.push(vl);
+  };
 
   const addViz = (wx, wy) => {
     const dispX = wx * sc.sx;
     const dispY = wy * sc.sy;
 
-    // ── 影響範囲シリンダー（シアン、半透明面 + 前後端ライン + 縦ライン）──
+    // ── 影響範囲シリンダー（グリーン、両モード共通）──
     const cylInf = new THREE.Mesh(
       new THREE.CylinderGeometry(influence, influence, zHalf * 2, SEG, 1, true),
       sMatInf.clone()
@@ -761,53 +807,123 @@ function buildArchDeformViz() {
       scene.add(ln);
       archDeformVizMeshes.push(ln);
     }
-    // 縦ライン（4方向）
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2;
-      const vpts = [
-        new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, -zHalf),
-        new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence,  zHalf),
-      ];
-      const vl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMatInf);
-      vl.renderOrder = 491;
-      scene.add(vl);
-      archDeformVizMeshes.push(vl);
+      addZLine(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, lMatInf, 491);
     }
 
-    // ── 目標アーチ半径シリンダー（黄色、半透明面 + 前後端ライン）──
-    const cylTgt = new THREE.Mesh(
-      new THREE.CylinderGeometry(targetR, targetR, zHalf * 2, SEG, 1, true),
-      sMatTgt.clone()
-    );
-    cylTgt.rotation.x = Math.PI / 2;
-    cylTgt.position.set(dispX, dispY, 0);
-    cylTgt.renderOrder = 492;
-    scene.add(cylTgt);
-    archDeformVizMeshes.push(cylTgt);
+    if (isRect) {
+      // ── 矩形モード: 黄色矩形ワイヤーフレーム ──
+      const axX = document.getElementById('archRectAxisX').checked;
+      const axY = document.getElementById('archRectAxisY').checked;
+      const rx  = parseFloat(document.getElementById('archRectRx').value) || 15;
+      const ry  = parseFloat(document.getElementById('archRectRy').value) || 20;
 
-    for (const z of [-zHalf, zHalf]) {
-      const pts = [];
-      for (let i = 0; i <= SEG; i++) {
-        const a = (i / SEG) * Math.PI * 2;
-        pts.push(new THREE.Vector3(dispX + Math.cos(a) * targetR, dispY + Math.sin(a) * targetR, z));
+      // 有効な軸に応じてプロファイル点を生成（U字形: 左→頂部→右、底は開口）
+      const makeProfile = (z) => {
+        if (axX && axY) {
+          return [
+            new THREE.Vector3(dispX - rx, dispY,      z),
+            new THREE.Vector3(dispX - rx, dispY + ry, z),
+            new THREE.Vector3(dispX + rx, dispY + ry, z),
+            new THREE.Vector3(dispX + rx, dispY,      z),
+          ];
+        } else if (axX) {
+          // 左右のみ: 2本の縦線（上下は influence 範囲で表現）
+          return null;
+        } else if (axY) {
+          // 上下のみ: 天井1本の横線（左右は influence 範囲で表現）
+          return [
+            new THREE.Vector3(dispX - influence, dispY + ry, z),
+            new THREE.Vector3(dispX + influence, dispY + ry, z),
+          ];
+        }
+        return null;
+      };
+
+      if (axX && !axY) {
+        // 左右のみ: ±rx に縦線パネルを描く
+        for (const x of [dispX - rx, dispX + rx]) {
+          for (const z of [-zHalf, zHalf]) {
+            const pts = [
+              new THREE.Vector3(x, dispY - influence * 0.5, z),
+              new THREE.Vector3(x, dispY + influence,       z),
+            ];
+            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt.clone());
+            ln.renderOrder = 493;
+            scene.add(ln);
+            archDeformVizMeshes.push(ln);
+          }
+          addZLine(x, dispY - influence * 0.5, lMatTgt.clone(), 493);
+          addZLine(x, dispY + influence,        lMatTgt.clone(), 493);
+        }
+      } else {
+        // Y軸あり（axY単独 または axX+axY）: プロファイルを前後端に描画
+        for (const z of [-zHalf, zHalf]) {
+          const pts = makeProfile(z);
+          if (pts && pts.length >= 2) {
+            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt.clone());
+            ln.renderOrder = 493;
+            scene.add(ln);
+            archDeformVizMeshes.push(ln);
+          }
+        }
+        // 前後端を結ぶ縦線（コーナー）
+        const profile = makeProfile(0);
+        if (profile) {
+          for (const pt of profile) {
+            addZLine(pt.x, pt.y, lMatTgt.clone(), 493);
+          }
+        }
       }
-      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt);
-      ln.renderOrder = 493;
-      scene.add(ln);
-      archDeformVizMeshes.push(ln);
-    }
-    // 目標半径の中心から放射線（ホイール中心 → 目標半径、Z=前後両端の平均）
-    const midZ = 0;
-    for (let i = 0; i < 8; i++) {
-      const a = (i / 8) * Math.PI * 2;
-      const vpts = [
-        new THREE.Vector3(dispX, dispY, midZ),
-        new THREE.Vector3(dispX + Math.cos(a) * targetR, dispY + Math.sin(a) * targetR, midZ),
-      ];
-      const vl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMatTgt);
-      vl.renderOrder = 493;
-      scene.add(vl);
-      archDeformVizMeshes.push(vl);
+
+      // 半透明ボックス（axX && axY 時のみ）
+      if (axX && axY) {
+        const boxMesh = new THREE.Mesh(
+          new THREE.BoxGeometry(rx * 2, ry, zHalf * 2),
+          sMatTgt.clone()
+        );
+        boxMesh.position.set(dispX, dispY + ry / 2, 0);
+        boxMesh.renderOrder = 492;
+        scene.add(boxMesh);
+        archDeformVizMeshes.push(boxMesh);
+      }
+
+    } else {
+      // ── 円形モード: 黄色円シリンダー（既存）──
+      const targetR = parseFloat(document.getElementById('archTargetRadius').value) || 15;
+      const cylTgt = new THREE.Mesh(
+        new THREE.CylinderGeometry(targetR, targetR, zHalf * 2, SEG, 1, true),
+        sMatTgt.clone()
+      );
+      cylTgt.rotation.x = Math.PI / 2;
+      cylTgt.position.set(dispX, dispY, 0);
+      cylTgt.renderOrder = 492;
+      scene.add(cylTgt);
+      archDeformVizMeshes.push(cylTgt);
+
+      for (const z of [-zHalf, zHalf]) {
+        const pts = [];
+        for (let i = 0; i <= SEG; i++) {
+          const a = (i / SEG) * Math.PI * 2;
+          pts.push(new THREE.Vector3(dispX + Math.cos(a) * targetR, dispY + Math.sin(a) * targetR, z));
+        }
+        const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt);
+        ln.renderOrder = 493;
+        scene.add(ln);
+        archDeformVizMeshes.push(ln);
+      }
+      for (let i = 0; i < 8; i++) {
+        const a = (i / 8) * Math.PI * 2;
+        const vpts = [
+          new THREE.Vector3(dispX, dispY, 0),
+          new THREE.Vector3(dispX + Math.cos(a) * targetR, dispY + Math.sin(a) * targetR, 0),
+        ];
+        const vl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(vpts), lMatTgt);
+        vl.renderOrder = 493;
+        scene.add(vl);
+        archDeformVizMeshes.push(vl);
+      }
     }
   };
 
@@ -1783,10 +1899,9 @@ function applyArchDeform() {
   const baseGeo = scaledGeo || currentGeo;
   if (!baseGeo || !wheels.front || !wheels.rear) { setMsg('スケール適用とホイール指定が必要です'); return; }
 
-  const influence     = parseFloat(document.getElementById('archInfluence').value)    || 20;
-  const targetRadius  = parseFloat(document.getElementById('archTargetRadius').value) || 15;
+  const influence     = parseFloat(document.getElementById('archInfluence').value) || 20;
   const shrinkEnabled = document.getElementById('archShrinkEnabled').checked;
-  if (targetRadius <= 0) { setMsg('目標アーチ半径に正の値を入力してください'); return; }
+  const isRect        = document.getElementById('archModeRect').checked;
 
   // アンドゥ用バックアップ（累積適用時は最初の状態のみ保持）
   if (!preArchDeformGeo) preArchDeformGeo = baseGeo.clone();
@@ -1800,28 +1915,83 @@ function applyArchDeform() {
   const geo = baseGeo.clone();
   const pos = geo.attributes.position.array;
 
-  for (let i = 0; i < pos.length; i += 3) {
-    let bestWeight = 0, bestWx = 0, bestWy = 0;
-    for (const { wx, wy } of wheelCenters) {
-      const dx = pos[i] - wx, dy = pos[i+1] - wy;
-      const d = Math.sqrt(dx*dx + dy*dy);
-      if (d < influence && d > 0.001) {
-        const t = 1 - d / influence;
-        const w = t * t;
-        if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+  if (isRect) {
+    // ── 矩形モード ──────────────────────────────────────────────
+    const rectAxisX = document.getElementById('archRectAxisX').checked;
+    const rectAxisY = document.getElementById('archRectAxisY').checked;
+    if (!rectAxisX && !rectAxisY) { setMsg('左右方向または上下方向を選択してください'); return; }
+    const rx = parseFloat(document.getElementById('archRectRx').value) || 15;
+    const ry = parseFloat(document.getElementById('archRectRy').value) || 20;
+
+    for (let i = 0; i < pos.length; i += 3) {
+      let bestWeight = 0, bestWx = 0, bestWy = 0;
+      for (const { wx, wy } of wheelCenters) {
+        const dx = pos[i] - wx, dy = pos[i+1] - wy;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < influence) {
+          const t = 1 - d / influence;
+          const w = t * t;
+          if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+        }
+      }
+      if (bestWeight > 0) {
+        const dx = pos[i]   - bestWx;
+        const dy = pos[i+1] - bestWy;
+
+        if (rectAxisX) {
+          const absDx = Math.abs(dx);
+          let deltaX = 0;
+          if (shrinkEnabled) {
+            // pull-only: ±rx の外側にある頂点を境界へ引き込む
+            if (absDx > rx) deltaX = (dx > 0 ? rx : -rx) - dx;
+          } else {
+            // push-only: ±rx の内側にある頂点を境界へ押し出す
+            if (absDx < rx && absDx > 0.001) deltaX = (dx > 0 ? rx : -rx) - dx;
+          }
+          pos[i] += deltaX * bestWeight;
+        }
+
+        if (rectAxisY) {
+          let deltaY = 0;
+          if (shrinkEnabled) {
+            // pull-only: ry より上の頂点を ry へ引き込む（アーチを低くする）
+            if (dy > ry) deltaY = ry - dy;
+          } else {
+            // push-only: 0〜ry の間にある頂点を ry へ押し出す（アーチを高くする）
+            if (dy > 0 && dy < ry) deltaY = ry - dy;
+          }
+          pos[i+1] += deltaY * bestWeight;
+        }
       }
     }
-    if (bestWeight > 0) {
-      const dx = pos[i] - bestWx, dy = pos[i+1] - bestWy;
-      const d = Math.sqrt(dx*dx + dy*dy);
-      // shrinkEnabled OFF: push-only（d < targetRadius の頂点を外へ押し出すのみ）
-      // shrinkEnabled ON : pull-only（d > targetRadius の頂点を内へ引き込むのみ）
-      const delta = shrinkEnabled
-        ? Math.min(0, targetRadius - d)   // pull-only
-        : Math.max(0, targetRadius - d);  // push-only
-      const newD = d + delta * bestWeight;
-      pos[i]   = bestWx + (dx / d) * newD;
-      pos[i+1] = bestWy + (dy / d) * newD;
+  } else {
+    // ── 円形モード（既存ロジック）────────────────────────────────
+    const targetRadius = parseFloat(document.getElementById('archTargetRadius').value) || 15;
+    if (targetRadius <= 0) { setMsg('目標アーチ半径に正の値を入力してください'); return; }
+
+    for (let i = 0; i < pos.length; i += 3) {
+      let bestWeight = 0, bestWx = 0, bestWy = 0;
+      for (const { wx, wy } of wheelCenters) {
+        const dx = pos[i] - wx, dy = pos[i+1] - wy;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < influence && d > 0.001) {
+          const t = 1 - d / influence;
+          const w = t * t;
+          if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+        }
+      }
+      if (bestWeight > 0) {
+        const dx = pos[i] - bestWx, dy = pos[i+1] - bestWy;
+        const d = Math.sqrt(dx*dx + dy*dy);
+        // shrinkEnabled OFF: push-only（d < targetRadius の頂点を外へ押し出すのみ）
+        // shrinkEnabled ON : pull-only（d > targetRadius の頂点を内へ引き込むのみ）
+        const delta = shrinkEnabled
+          ? Math.min(0, targetRadius - d)   // pull-only
+          : Math.max(0, targetRadius - d);  // push-only
+        const newD = d + delta * bestWeight;
+        pos[i]   = bestWx + (dx / d) * newD;
+        pos[i+1] = bestWy + (dy / d) * newD;
+      }
     }
   }
 
@@ -3300,10 +3470,23 @@ document.getElementById('archDeformEnabled').addEventListener('change', function
   document.getElementById('archDeformOptions').style.display = this.checked ? 'block' : 'none';
   buildArchDeformViz();
 });
+// 円形 / 矩形 モード切替
+function onArchModeChange() {
+  const isRect = document.getElementById('archModeRect').checked;
+  document.getElementById('archCircleOptions').style.display = isRect ? 'none'  : 'block';
+  document.getElementById('archRectOptions').style.display   = isRect ? 'block' : 'none';
+  buildArchDeformViz();
+}
+document.getElementById('archModeCircle').addEventListener('change', onArchModeChange);
+document.getElementById('archModeRect').addEventListener('change',   onArchModeChange);
 document.getElementById('archApplyBtn').addEventListener('click', applyArchDeform);
 document.getElementById('archUndoBtn').addEventListener('click',  resetArchDeform);
 document.getElementById('archInfluence').addEventListener('input',    () => buildArchDeformViz());
 document.getElementById('archTargetRadius').addEventListener('input', () => buildArchDeformViz());
+document.getElementById('archRectRx').addEventListener('input',      () => buildArchDeformViz());
+document.getElementById('archRectRy').addEventListener('input',      () => buildArchDeformViz());
+document.getElementById('archRectAxisX').addEventListener('change',  () => buildArchDeformViz());
+document.getElementById('archRectAxisY').addEventListener('change',  () => buildArchDeformViz());
 document.getElementById('subdivBtn').addEventListener('click', applySubdivide);
 document.getElementById('shellThk').addEventListener('input',      () => buildTireCylinders());
 

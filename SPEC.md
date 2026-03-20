@@ -162,13 +162,18 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 | ホイールアーチ局所変形（オプション） | `archDeformEnabled` | チェック時のみ操作UIと可視化円（グリーン・黄色）を表示 |
 | 影響半径 | `archInfluence` | ホイール中心から何 mm 以内の頂点を変形するか（デフォルト 20mm）。**グリーン円**で可視化 |
 | 目標アーチ半径 | `archTargetRadius` | 変形後にアーチがホイール中心から何 mm の位置になるかの目標値（デフォルト 15mm）。**黄色円**で可視化 |
-| 縮小方向にも変形する | `archShrinkEnabled` | OFF（デフォルト）: push-only（拡大のみ）。ON: pull-only（縮小のみ、溝部分を引き込む） |
+| 変形モード | `archModeCircle` / `archModeRect` | ラジオボタン。**円形**（デフォルト）または**矩形**を選択 |
+| 縮小方向にも変形する | `archShrinkEnabled` | 円形・矩形共通。OFF（デフォルト）: push-only（拡大）。ON: pull-only（縮小） |
+| 左右方向 (X) | `archRectAxisX` | 矩形モード時。チェックで X 軸方向の収束を有効化 |
+| RX | `archRectRx` | 矩形モード時。ホイール中心から左右 ±RX mm の位置を目標境界とする |
+| 上下方向 (Y) | `archRectAxisY` | 矩形モード時。チェックで Y 軸方向の収束を有効化 |
+| RY | `archRectRy` | 矩形モード時。ホイール中心 Y から上方 RY mm の位置を目標境界とする |
 | 最大辺長 | `subdivMaxEdge` | SUBDIVIDE セクション。影響半径（グリーン円）内でこの長さ (mm) を超える辺を持つ三角形を 4 分割（デフォルト 3mm）。`subdivBtn` で実行 |
 | ▶ 細分化実行 | `subdivBtn` | アーチ変形前の下ごしらえとして実行。グリーン円内のみ細分化するため全体ポリゴン数の増加を抑制。T字接合対策済み（後述） |
 | ▶ アーチ変形 | `archApplyBtn` | DEFORM セクション。変形を累積適用。クリックごとに目標半径へ段階的に近づく |
 | ↩ 戻す | `archUndoBtn` | 最初の適用前の `scaledGeo` に戻す（1段階 undo） |
 
-**アルゴリズム**
+**アルゴリズム（円形モード）**
 
 各頂点について、前輪・後輪それぞれのホイール中心からの XY 平面距離 `d` を計算する。
 より大きな weight を持つホイールを選択し、半径方向（Z 不変）に移動する。
@@ -193,6 +198,30 @@ vertex.z 変化なし
 - `d = targetRadius` 付近は weight × delta が 0 に近づくため滑らかに変化
 - `d ≥ influence` の頂点は変化なし（影響範囲外）
 - スケール適用済みの場合、ホイール座標を `wheels.x × sx`、`wheels.y × sy` で変換してから使用
+
+**アルゴリズム（矩形モード）**
+
+X・Y 軸を独立して処理する。チェックした軸のみ補正を適用（両方・片方どちらも可）。
+
+```
+weight = max(0, (1 - d / influence))²   ← 影響ウェイトは円形モードと同じ
+
+[左右方向 X — archRectAxisX]
+  [shrinkEnabled ON  — 縮小] |dx| > rx の頂点を ±rx へ引き込む
+    deltaX = (dx>0 ? rx : -rx) - dx   (|dx|>rx のとき、それ以外は 0)
+  [shrinkEnabled OFF — 拡大] |dx| < rx の頂点を ±rx へ押し出す
+    deltaX = (dx>0 ? rx : -rx) - dx   (0 < |dx| < rx のとき、それ以外は 0)
+  vertex.x += deltaX × weight
+
+[上下方向 Y — archRectAxisY]
+  [shrinkEnabled ON  — 縮小] dy > ry の頂点を ry へ引き込む（アーチを低くする）
+    deltaY = ry - dy   (dy > ry のとき、それ以外は 0)
+  [shrinkEnabled OFF — 拡大] 0 < dy < ry の頂点を ry へ押し出す（アーチを高くする）
+    deltaY = ry - dy   (0 < dy < ry のとき、それ以外は 0)
+  vertex.y += deltaY × weight
+
+vertex.z 変化なし
+```
 - 変形結果は `scaledGeo` を差し替えて保存（`shellGeo` は無効化）
 - `preArchDeformGeo` に変形前の `scaledGeo` をバックアップ（最初の適用時のみ保存）
 
