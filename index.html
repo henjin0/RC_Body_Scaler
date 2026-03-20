@@ -337,27 +337,39 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
         ▸ ホイールアーチ局所変形（オプション）
       </label>
       <div id="archDeformOptions" style="display:none">
+        <!-- 影響範囲（グリーン） -->
         <div class="inp-group">
-          <label>影響半径 (mm) <span style="color:#44ff44;font-size:10px">● グリーン円</span></label>
+          <label>影響半径 (mm) <span style="color:#44ff44;font-size:10px">● グリーン</span></label>
           <div class="inp-row">
             <input type="number" id="archInfluence" value="20" step="1" min="1">
             <span class="unit">mm</span>
           </div>
-          <div style="font-size:10px;color:var(--dim);margin-top:2px">この半径内の頂点が変形対象</div>
+          <div style="display:flex;gap:12px;margin-top:4px;font-size:11px">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="radio" name="archInfShape" id="archInfShapeCircle" checked style="accent-color:var(--accent)"> 円形
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="radio" name="archInfShape" id="archInfShapeRect" style="accent-color:var(--accent)"> 矩形
+            </label>
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-top:2px">この範囲内の頂点が変形対象</div>
         </div>
-        <!-- モード切替 -->
-        <div style="display:flex;gap:14px;margin-bottom:6px;font-size:11px">
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="archMode" id="archModeCircle" checked style="accent-color:var(--accent)"> 円形
-          </label>
-          <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
-            <input type="radio" name="archMode" id="archModeRect" style="accent-color:var(--accent)"> 矩形
-          </label>
+        <!-- 目標形状（黄色） -->
+        <div class="inp-group" style="margin-top:4px">
+          <label>目標形状 <span style="color:#ffeb3b;font-size:10px">● 黄色</span></label>
+          <div style="display:flex;gap:12px;margin-top:2px;font-size:11px">
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="radio" name="archTgtShape" id="archTgtShapeCircle" checked style="accent-color:var(--accent)"> 円形
+            </label>
+            <label style="display:flex;align-items:center;gap:4px;cursor:pointer">
+              <input type="radio" name="archTgtShape" id="archTgtShapeRect" style="accent-color:var(--accent)"> 矩形
+            </label>
+          </div>
         </div>
-        <!-- 円形モード専用 -->
+        <!-- 円形目標専用 -->
         <div id="archCircleOptions">
           <div class="inp-group">
-            <label>目標アーチ半径 (mm) <span style="color:#ffeb3b;font-size:10px">● 黄色円</span></label>
+            <label>目標アーチ半径 (mm)</label>
             <div class="inp-row">
               <input type="number" id="archTargetRadius" value="15" step="0.5" min="0.5">
               <span class="unit">mm</span>
@@ -365,7 +377,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
             <div style="font-size:10px;color:var(--dim);margin-top:2px">ホイール中心からアーチを変形させたい距離</div>
           </div>
         </div>
-        <!-- 矩形モード専用 -->
+        <!-- 矩形目標専用 -->
         <div id="archRectOptions" style="display:none">
           <div style="font-size:10px;color:var(--dim);margin-bottom:6px">収束させる軸と目標距離を選択</div>
           <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-bottom:3px">
@@ -386,7 +398,7 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
             <input type="number" id="archRectRy" value="20" step="0.5" min="0.5">
             <span class="unit">mm</span>
           </div>
-          <div style="font-size:10px;color:var(--dim);margin-bottom:2px">RX: 左右±距離　RY: ホイール中心Yからの上方距離</div>
+          <div style="font-size:10px;color:var(--dim);margin-bottom:2px">RX・RY: ホイール中心から±距離</div>
         </div>
         <!-- 共通: 縮小/拡大 -->
         <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none;margin-top:6px">
@@ -752,7 +764,8 @@ function buildArchDeformViz() {
   if (!wheels.front && !wheels.rear) return;
 
   const influence  = parseFloat(document.getElementById('archInfluence').value) || 20;
-  const isRect     = document.getElementById('archModeRect').checked;
+  const isInfRect  = document.getElementById('archInfShapeRect').checked;
+  const isTgtRect  = document.getElementById('archTgtShapeRect').checked;
   const sc         = appliedScales || { sx: 1, sy: 1, sz: 1 };
 
   const refGeo = scaledGeo || currentGeo;
@@ -785,8 +798,8 @@ function buildArchDeformViz() {
     const dispX = wx * sc.sx;
     const dispY = wy * sc.sy;
 
-    // ── 影響範囲（グリーン）——モード別に円 or 矩形 ──
-    if (isRect) {
+    // ── 影響範囲（グリーン）——形状別に円 or 矩形 ──
+    if (isInfRect) {
       // 矩形: ±influence の正方形ボックス
       const infBoxMesh = new THREE.Mesh(
         new THREE.BoxGeometry(influence * 2, influence * 2, zHalf * 2),
@@ -849,8 +862,8 @@ function buildArchDeformViz() {
       }
     }
 
-    if (isRect) {
-      // ── 矩形モード: 黄色矩形ワイヤーフレーム ──
+    if (isTgtRect) {
+      // ── 矩形目標: 黄色矩形ワイヤーフレーム ──
       const axX = document.getElementById('archRectAxisX').checked;
       const axY = document.getElementById('archRectAxisY').checked;
       const rx  = parseFloat(document.getElementById('archRectRx').value) || 15;
@@ -937,7 +950,7 @@ function buildArchDeformViz() {
       }
 
     } else {
-      // ── 円形モード: 黄色円シリンダー（既存）──
+      // ── 円形目標: 黄色円シリンダー ──
       const targetR = parseFloat(document.getElementById('archTargetRadius').value) || 15;
       const cylTgt = new THREE.Mesh(
         new THREE.CylinderGeometry(targetR, targetR, zHalf * 2, SEG, 1, true),
@@ -1948,7 +1961,8 @@ function applyArchDeform() {
 
   const influence     = parseFloat(document.getElementById('archInfluence').value) || 20;
   const shrinkEnabled = document.getElementById('archShrinkEnabled').checked;
-  const isRect        = document.getElementById('archModeRect').checked;
+  const isInfRect     = document.getElementById('archInfShapeRect').checked;
+  const isTgtRect     = document.getElementById('archTgtShapeRect').checked;
 
   // アンドゥ用バックアップ（累積適用時は最初の状態のみ保持）
   if (!preArchDeformGeo) preArchDeformGeo = baseGeo.clone();
@@ -1962,85 +1976,81 @@ function applyArchDeform() {
   const geo = baseGeo.clone();
   const pos = geo.attributes.position.array;
 
-  if (isRect) {
-    // ── 矩形モード ──────────────────────────────────────────────
+  // 矩形目標を使う場合は軸チェック
+  if (isTgtRect) {
     const rectAxisX = document.getElementById('archRectAxisX').checked;
     const rectAxisY = document.getElementById('archRectAxisY').checked;
     if (!rectAxisX && !rectAxisY) { setMsg('左右方向または上下方向を選択してください'); return; }
-    const rx = parseFloat(document.getElementById('archRectRx').value) || 15;
-    const ry = parseFloat(document.getElementById('archRectRy').value) || 20;
+  }
+  const targetRadius = isTgtRect ? null : (parseFloat(document.getElementById('archTargetRadius').value) || 15);
+  if (!isTgtRect && targetRadius <= 0) { setMsg('目標アーチ半径に正の値を入力してください'); return; }
+  const rectAxisX = isTgtRect && document.getElementById('archRectAxisX').checked;
+  const rectAxisY = isTgtRect && document.getElementById('archRectAxisY').checked;
+  const rx = parseFloat(document.getElementById('archRectRx').value) || 15;
+  const ry = parseFloat(document.getElementById('archRectRy').value) || 20;
 
-    for (let i = 0; i < pos.length; i += 3) {
-      let bestWeight = 0, bestWx = 0, bestWy = 0;
-      for (const { wx, wy } of wheelCenters) {
-        const dx = pos[i] - wx, dy = pos[i+1] - wy;
+  // 影響範囲・目標形状を独立して組み合わせた統合ループ
+  for (let i = 0; i < pos.length; i += 3) {
+    let bestWeight = 0, bestWx = 0, bestWy = 0;
+
+    for (const { wx, wy } of wheelCenters) {
+      const dx = pos[i] - wx, dy = pos[i+1] - wy;
+      let w = 0;
+      if (isInfRect) {
+        // 矩形影響範囲: 両軸ともに influence 内、遠い方でウェイト決定
         const absDx = Math.abs(dx), absDy = Math.abs(dy);
         if (absDx < influence && absDy < influence) {
-          // 矩形影響範囲: 両軸の「遠い方」でウェイトを決定
           const t = Math.min(1 - absDx / influence, 1 - absDy / influence);
-          const w = t * t;
-          if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+          w = t * t;
+        }
+      } else {
+        // 円形影響範囲
+        const d = Math.sqrt(dx*dx + dy*dy);
+        if (d < influence && d > 0.001) {
+          const t = 1 - d / influence;
+          w = t * t;
         }
       }
-      if (bestWeight > 0) {
-        const dx = pos[i]   - bestWx;
-        const dy = pos[i+1] - bestWy;
+      if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+    }
 
+    if (bestWeight > 0) {
+      const dx = pos[i]   - bestWx;
+      const dy = pos[i+1] - bestWy;
+
+      if (isTgtRect) {
+        // 矩形目標: X・Y 独立処理
         if (rectAxisX) {
           const absDx = Math.abs(dx);
           let deltaX = 0;
           if (shrinkEnabled) {
-            // pull-only: ±rx の外側にある頂点を境界へ引き込む
             if (absDx > rx) deltaX = (dx > 0 ? rx : -rx) - dx;
           } else {
-            // push-only: ±rx の内側にある頂点を境界へ押し出す
             if (absDx < rx && absDx > 0.001) deltaX = (dx > 0 ? rx : -rx) - dx;
           }
           pos[i] += deltaX * bestWeight;
         }
-
         if (rectAxisY) {
-          // Y軸も X軸と同様に ±ry の対称形で処理（ホイール中心が中央）
           const absDy = Math.abs(dy);
           let deltaY = 0;
           if (shrinkEnabled) {
-            // pull-only: |dy| > ry の頂点を ±ry へ引き込む
             if (absDy > ry) deltaY = (dy > 0 ? ry : -ry) - dy;
           } else {
-            // push-only: |dy| < ry の頂点を ±ry へ押し出す
             if (absDy < ry && absDy > 0.001) deltaY = (dy > 0 ? ry : -ry) - dy;
           }
           pos[i+1] += deltaY * bestWeight;
         }
-      }
-    }
-  } else {
-    // ── 円形モード（既存ロジック）────────────────────────────────
-    const targetRadius = parseFloat(document.getElementById('archTargetRadius').value) || 15;
-    if (targetRadius <= 0) { setMsg('目標アーチ半径に正の値を入力してください'); return; }
-
-    for (let i = 0; i < pos.length; i += 3) {
-      let bestWeight = 0, bestWx = 0, bestWy = 0;
-      for (const { wx, wy } of wheelCenters) {
-        const dx = pos[i] - wx, dy = pos[i+1] - wy;
+      } else {
+        // 円形目標: ラジアル処理
         const d = Math.sqrt(dx*dx + dy*dy);
-        if (d < influence && d > 0.001) {
-          const t = 1 - d / influence;
-          const w = t * t;
-          if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
+        if (d > 0.001) {
+          const delta = shrinkEnabled
+            ? Math.min(0, targetRadius - d)
+            : Math.max(0, targetRadius - d);
+          const newD = d + delta * bestWeight;
+          pos[i]   = bestWx + (dx / d) * newD;
+          pos[i+1] = bestWy + (dy / d) * newD;
         }
-      }
-      if (bestWeight > 0) {
-        const dx = pos[i] - bestWx, dy = pos[i+1] - bestWy;
-        const d = Math.sqrt(dx*dx + dy*dy);
-        // shrinkEnabled OFF: push-only（d < targetRadius の頂点を外へ押し出すのみ）
-        // shrinkEnabled ON : pull-only（d > targetRadius の頂点を内へ引き込むのみ）
-        const delta = shrinkEnabled
-          ? Math.min(0, targetRadius - d)   // pull-only
-          : Math.max(0, targetRadius - d);  // push-only
-        const newD = d + delta * bestWeight;
-        pos[i]   = bestWx + (dx / d) * newD;
-        pos[i+1] = bestWy + (dy / d) * newD;
       }
     }
   }
@@ -3521,14 +3531,18 @@ document.getElementById('archDeformEnabled').addEventListener('change', function
   buildArchDeformViz();
 });
 // 円形 / 矩形 モード切替
-function onArchModeChange() {
-  const isRect = document.getElementById('archModeRect').checked;
+// 影響範囲形状切替（グリーン）→ viz のみ更新
+document.getElementById('archInfShapeCircle').addEventListener('change', () => buildArchDeformViz());
+document.getElementById('archInfShapeRect').addEventListener('change',   () => buildArchDeformViz());
+// 目標形状切替（黄色）→ オプションパネル切替 + viz 更新
+function onArchTgtShapeChange() {
+  const isRect = document.getElementById('archTgtShapeRect').checked;
   document.getElementById('archCircleOptions').style.display = isRect ? 'none'  : 'block';
   document.getElementById('archRectOptions').style.display   = isRect ? 'block' : 'none';
   buildArchDeformViz();
 }
-document.getElementById('archModeCircle').addEventListener('change', onArchModeChange);
-document.getElementById('archModeRect').addEventListener('change',   onArchModeChange);
+document.getElementById('archTgtShapeCircle').addEventListener('change', onArchTgtShapeChange);
+document.getElementById('archTgtShapeRect').addEventListener('change',   onArchTgtShapeChange);
 document.getElementById('archApplyBtn').addEventListener('click', applyArchDeform);
 document.getElementById('archUndoBtn').addEventListener('click',  resetArchDeform);
 document.getElementById('archInfluence').addEventListener('input',    () => buildArchDeformViz());
