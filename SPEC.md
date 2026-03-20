@@ -287,11 +287,27 @@ Phase 2: 全三角形を処理
 | 縦半径 RY（かまぼこ） | `cutTireRy` | 矩形部の高さ ＝ 半楕円の垂直半軸、デフォルト 30mm |
 | クリアランス | `tireClearance` | タイヤ半径に加算する余裕代（デフォルト 2mm） |
 | 肉厚を加算 | `cutAddThk` | チェック時、カット半径にシェル肉厚を加算する（デフォルト OFF）。OFF 時: カット半径 = 指定値 + クリアランス。ON 時: カット半径 = 指定値 + クリアランス + 肉厚 |
+| 前輪オフセット X / Y | `cutFrontOffX` / `cutFrontOffY` | 前輪のくり抜き中心をホイール中心から相対移動する量（スケール後 mm）。X=左右・Y=上下。デフォルト 0。↑↓キーで 0.5mm 刻み調整可 |
+| 後輪オフセット X / Y | `cutRearOffX` / `cutRearOffY` | 後輪のくり抜き中心をホイール中心から相対移動する量（スケール後 mm）。前輪と独立して設定可。デフォルト 0 |
 | カット範囲制限 | `shellClipRange` | チェック時、6方向それぞれの最大到達距離を % で制限（100=制限なし） |
 
-**タイヤ穴くり抜きの座標系**
+**タイヤ穴くり抜きの座標系とオフセット**
 
 スケール適用済み（`scaledGeo` が存在する）場合は **スケール後のジオメトリに直接カット**する。
+
+くり抜き中心にはホイール中心座標に位置オフセットを加算する。オフセットはスケール後の表示座標系（mm）で指定する。
+
+```
+// スケール適用済みの場合
+wx_cut = wheels.front.x * sx + cutFrontOffX
+wy_cut = wheels.front.y * sy + cutFrontOffY
+
+// スケール未適用の場合
+wx_cut = wheels.front.x + cutFrontOffX
+wy_cut = wheels.front.y + cutFrontOffY
+```
+
+オレンジ可視化（`buildTireCylinders`）も同じオフセットを適用してリアルタイムに更新される。
 
 - ホイール座標をスケール後実寸に変換: `wx = wheels.x × sx`、`wy = wheels.y × sy`
 - カット半径はそのまま実寸で使用（割り戻し不要）
