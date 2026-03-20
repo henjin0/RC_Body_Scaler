@@ -1613,42 +1613,118 @@ document.getElementById('applyBtn').addEventListener('click',()=>{
 // 非インデックス BufferGeometry（三角形スープ）を受け取り、
 // maxEdge を超える辺を持つ三角形を4分割する。maxIter 回繰り返す。
 // zoneFn(cx, cy, cz) が指定された場合、重心がゾーン内の三角形のみ細分化対象とする。
+// T字接合対策: 細分化された三角形の辺を共有する隣接三角形も中点で分割してクラックを防ぐ。
 function subdivideGeoByEdge(geo, maxEdge, maxIter, zoneFn) {
   let pos = Array.from(geo.attributes.position.array);
 
+  // 頂点座標をキー文字列に変換（6桁精度）
+  const vkey = (x, y, z) => `${x.toFixed(6)},${y.toFixed(6)},${z.toFixed(6)}`;
+  // 辺を方向に依存しないキーに変換（両端点を辞書順でソート）
+  const edgeKey = (ax, ay, az, bx, by, bz) => {
+    const ka = vkey(ax, ay, az), kb = vkey(bx, by, bz);
+    return ka < kb ? `${ka}|${kb}` : `${kb}|${ka}`;
+  };
+
   for (let iter = 0; iter < maxIter; iter++) {
     let newPos = [];
-    let subdivided = false;
+    let anyChange = false;
 
+    // Phase 1: 細分化対象の三角形の辺をすべて収集 → 中点マップを構築
+    const edgeMidMap = new Map();
     for (let i = 0; i < pos.length; i += 9) {
-      const ax = pos[i],   ay = pos[i+1], az = pos[i+2];
-      const bx = pos[i+3], by = pos[i+4], bz = pos[i+5];
-      const cx = pos[i+6], cy = pos[i+7], cz = pos[i+8];
-
-      const lenAB = Math.sqrt((bx-ax)**2 + (by-ay)**2 + (bz-az)**2);
-      const lenBC = Math.sqrt((cx-bx)**2 + (cy-by)**2 + (cz-bz)**2);
-      const lenCA = Math.sqrt((ax-cx)**2 + (ay-cy)**2 + (az-cz)**2);
-
-      // ゾーンフィルタ: 重心が対象ゾーン外の三角形はそのまま通過
+      const ax=pos[i],   ay=pos[i+1], az=pos[i+2];
+      const bx=pos[i+3], by=pos[i+4], bz=pos[i+5];
+      const cx=pos[i+6], cy=pos[i+7], cz=pos[i+8];
       const inZone = !zoneFn || zoneFn((ax+bx+cx)/3, (ay+by+cy)/3, (az+bz+cz)/3);
+      if (!inZone) continue;
+      const lenAB = Math.sqrt((bx-ax)**2+(by-ay)**2+(bz-az)**2);
+      const lenBC = Math.sqrt((cx-bx)**2+(cy-by)**2+(cz-bz)**2);
+      const lenCA = Math.sqrt((ax-cx)**2+(ay-cy)**2+(az-cz)**2);
+      if (lenAB <= maxEdge && lenBC <= maxEdge && lenCA <= maxEdge) continue;
+      // この三角形は4分割される → 3辺すべての中点を登録
+      edgeMidMap.set(edgeKey(ax,ay,az, bx,by,bz), [(ax+bx)/2,(ay+by)/2,(az+bz)/2]);
+      edgeMidMap.set(edgeKey(bx,by,bz, cx,cy,cz), [(bx+cx)/2,(by+cy)/2,(bz+cz)/2]);
+      edgeMidMap.set(edgeKey(cx,cy,cz, ax,ay,az), [(cx+ax)/2,(cy+ay)/2,(cz+az)/2]);
+    }
+
+    // Phase 2: 全三角形を処理
+    for (let i = 0; i < pos.length; i += 9) {
+      const ax=pos[i],   ay=pos[i+1], az=pos[i+2];
+      const bx=pos[i+3], by=pos[i+4], bz=pos[i+5];
+      const cx=pos[i+6], cy=pos[i+7], cz=pos[i+8];
+      const inZone = !zoneFn || zoneFn((ax+bx+cx)/3, (ay+by+cy)/3, (az+bz+cz)/3);
+      const lenAB = Math.sqrt((bx-ax)**2+(by-ay)**2+(bz-az)**2);
+      const lenBC = Math.sqrt((cx-bx)**2+(cy-by)**2+(cz-bz)**2);
+      const lenCA = Math.sqrt((ax-cx)**2+(ay-cy)**2+(az-cz)**2);
 
       if (inZone && (lenAB > maxEdge || lenBC > maxEdge || lenCA > maxEdge)) {
-        const mabx = (ax+bx)/2, maby = (ay+by)/2, mabz = (az+bz)/2;
-        const mbcx = (bx+cx)/2, mbcy = (by+cy)/2, mbcz = (bz+cz)/2;
-        const mcax = (cx+ax)/2, mcay = (cy+ay)/2, mcaz = (cz+az)/2;
-        // 4 sub-triangles
+        // 通常の4分割
+        const [mabx,maby,mabz] = edgeMidMap.get(edgeKey(ax,ay,az, bx,by,bz));
+        const [mbcx,mbcy,mbcz] = edgeMidMap.get(edgeKey(bx,by,bz, cx,cy,cz));
+        const [mcax,mcay,mcaz] = edgeMidMap.get(edgeKey(cx,cy,cz, ax,ay,az));
         newPos.push(ax,   ay,   az,   mabx, maby, mabz, mcax, mcay, mcaz);
         newPos.push(mabx, maby, mabz, bx,   by,   bz,   mbcx, mbcy, mbcz);
         newPos.push(mcax, mcay, mcaz, mbcx, mbcy, mbcz, cx,   cy,   cz  );
         newPos.push(mabx, maby, mabz, mbcx, mbcy, mbcz, mcax, mcay, mcaz);
-        subdivided = true;
+        anyChange = true;
       } else {
-        newPos.push(ax, ay, az, bx, by, bz, cx, cy, cz);
+        // T字接合チェック: 隣接する細分化済み三角形が分割した辺を持つか調べる
+        const mAB = edgeMidMap.get(edgeKey(ax,ay,az, bx,by,bz));
+        const mBC = edgeMidMap.get(edgeKey(bx,by,bz, cx,cy,cz));
+        const mCA = edgeMidMap.get(edgeKey(cx,cy,cz, ax,ay,az));
+        const n = (mAB?1:0) + (mBC?1:0) + (mCA?1:0);
+
+        if (n === 0) {
+          // T字接合なし → そのまま
+          newPos.push(ax,ay,az, bx,by,bz, cx,cy,cz);
+        } else if (n === 3) {
+          // 3辺すべて分割済み → 4分割（完全に細分化ゾーンに囲まれた境界三角形）
+          const [mabx,maby,mabz]=mAB, [mbcx,mbcy,mbcz]=mBC, [mcax,mcay,mcaz]=mCA;
+          newPos.push(ax,   ay,   az,   mabx, maby, mabz, mcax, mcay, mcaz);
+          newPos.push(mabx, maby, mabz, bx,   by,   bz,   mbcx, mbcy, mbcz);
+          newPos.push(mcax, mcay, mcaz, mbcx, mbcy, mbcz, cx,   cy,   cz  );
+          newPos.push(mabx, maby, mabz, mbcx, mbcy, mbcz, mcax, mcay, mcaz);
+          anyChange = true;
+        } else if (n === 1) {
+          // 1辺分割 → 2分割
+          if (mAB) {
+            const [mx,my,mz]=mAB;
+            newPos.push(ax,ay,az, mx,my,mz, cx,cy,cz);
+            newPos.push(mx,my,mz, bx,by,bz, cx,cy,cz);
+          } else if (mBC) {
+            const [mx,my,mz]=mBC;
+            newPos.push(ax,ay,az, bx,by,bz, mx,my,mz);
+            newPos.push(ax,ay,az, mx,my,mz, cx,cy,cz);
+          } else {
+            const [mx,my,mz]=mCA;
+            newPos.push(ax,ay,az, bx,by,bz, mx,my,mz);
+            newPos.push(bx,by,bz, cx,cy,cz, mx,my,mz);
+          }
+          anyChange = true;
+        } else { // n === 2: 2辺分割 → 3分割
+          if (!mAB) {
+            const [mbcx,mbcy,mbcz]=mBC, [mcax,mcay,mcaz]=mCA;
+            newPos.push(ax,ay,az,   bx,by,bz,     mbcx,mbcy,mbcz);
+            newPos.push(ax,ay,az,   mbcx,mbcy,mbcz, mcax,mcay,mcaz);
+            newPos.push(mcax,mcay,mcaz, mbcx,mbcy,mbcz, cx,cy,cz);
+          } else if (!mBC) {
+            const [mabx,maby,mabz]=mAB, [mcax,mcay,mcaz]=mCA;
+            newPos.push(ax,ay,az,   mabx,maby,mabz, mcax,mcay,mcaz);
+            newPos.push(mabx,maby,mabz, bx,by,bz,   cx,cy,cz);
+            newPos.push(mabx,maby,mabz, cx,cy,cz,   mcax,mcay,mcaz);
+          } else {
+            const [mabx,maby,mabz]=mAB, [mbcx,mbcy,mbcz]=mBC;
+            newPos.push(ax,ay,az,   mabx,maby,mabz, cx,cy,cz);
+            newPos.push(mabx,maby,mabz, bx,by,bz,   mbcx,mbcy,mbcz);
+            newPos.push(mabx,maby,mabz, mbcx,mbcy,mbcz, cx,cy,cz);
+          }
+          anyChange = true;
+        }
       }
     }
 
     pos = newPos;
-    if (!subdivided) break;
+    if (!anyChange) break;
   }
 
   const newGeo = new THREE.BufferGeometry();
