@@ -163,10 +163,10 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 | 影響半径 | `archInfluence` | ホイール中心から何 mm 以内の頂点を変形するか（デフォルト 20mm）。**グリーン円**で可視化 |
 | 目標アーチ半径 | `archTargetRadius` | 変形後にアーチがホイール中心から何 mm の位置になるかの目標値（デフォルト 15mm）。**黄色円**で可視化 |
 | 縮小方向にも変形する | `archShrinkEnabled` | OFF（デフォルト）: push-only（拡大のみ）。ON: pull-only（縮小のみ、溝部分を引き込む） |
-| ▶ アーチ変形 | `archApplyBtn` | 変形を累積適用。クリックごとに目標半径へ段階的に近づく |
+| 最大辺長 | `subdivMaxEdge` | SUBDIVIDE セクション。影響半径（グリーン円）内でこの長さ (mm) を超える辺を持つ三角形を 4 分割（デフォルト 3mm）。`subdivBtn` で実行 |
+| ▶ 細分化実行 | `subdivBtn` | アーチ変形前の下ごしらえとして実行。グリーン円内のみ細分化するため全体ポリゴン数の増加を抑制 |
+| ▶ アーチ変形 | `archApplyBtn` | DEFORM セクション。変形を累積適用。クリックごとに目標半径へ段階的に近づく |
 | ↩ 戻す | `archUndoBtn` | 最初の適用前の `scaledGeo` に戻す（1段階 undo） |
-| ポリゴン細分化 | `subdivEnabled` | チェック時のみ細分化オプションを表示（デフォルト：非表示、オプション機能） |
-| 最大辺長 | `subdivMaxEdge` | この長さ (mm) を超える辺を持つ三角形を 4 分割（デフォルト 3mm）。`subdivBtn` で実行 |
 
 **アルゴリズム**
 
@@ -440,8 +440,8 @@ const THEME = {
 | `resetArchDeform()` | `preArchDeformGeo` から変形前の `scaledGeo` を復元（1段階 undo） |
 | `buildArchDeformViz()` | 影響範囲（グリーン円筒）と目標アーチ半径（黄色円筒）をシーンに描画 |
 | `removeArchDeformViz()` | アーチ変形可視化メッシュをシーンから削除・dispose |
-| `subdivideGeoByEdge(geo, maxEdge, maxIter)` | maxEdge を超える辺を持つ三角形を 4 分割。非インデックス BufferGeometry を返す |
-| `applySubdivide()` | `subdivBtn` から呼び出し。`scaledGeo` を細分化して `scaledMesh` を再構築 |
+| `subdivideGeoByEdge(geo, maxEdge, maxIter, zoneFn)` | maxEdge を超える辺を持つ三角形を 4 分割。`zoneFn(cx,cy,cz)` が指定された場合、重心がゾーン内の三角形のみ対象。非インデックス BufferGeometry を返す |
+| `applySubdivide()` | `subdivBtn` から呼び出し。ホイール中心・`archInfluence` からゾーン判定関数を生成し、影響半径（グリーン円）内のみ細分化して `scaledGeo`/`scaledMesh` を再構築 |
 
 ---
 

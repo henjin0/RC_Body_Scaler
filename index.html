@@ -358,27 +358,25 @@ header h1{font-family:'Share Tech Mono',monospace;font-size:15px;color:var(--acc
           縮小方向にも変形する
         </label>
         <div style="font-size:10px;color:var(--dim);margin-top:2px">OFF: 内側の頂点を外へ押し出し（拡大）　ON: 外側の頂点を内へ引き込み（縮小）</div>
-        <div style="display:flex;gap:6px;margin-top:6px">
-          <button id="archApplyBtn" class="apply-btn" style="flex:1">▶ アーチ変形</button>
-          <button id="archUndoBtn"  class="reset-btn" style="display:none;flex:1">↩ 戻す</button>
-        </div>
-        <div style="font-size:10px;color:var(--dim);margin-top:4px">※ クリックのたびに目標半径へ段階的に近づきます。繰り返し適用可。</div>
         <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:6px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;user-select:none">
-            <input type="checkbox" id="subdivEnabled" style="width:13px;height:13px;accent-color:var(--accent2);cursor:pointer">
-            ポリゴン細分化（オプション）
-          </label>
-          <div id="subdivOptions" style="display:none;margin-top:6px">
-            <div class="inp-group" style="margin-bottom:4px">
-              <label>最大辺長 (mm)</label>
-              <div class="inp-row">
-                <input type="number" id="subdivMaxEdge" value="3" step="0.5" min="0.5">
-                <span class="unit">mm</span>
-              </div>
-              <div style="font-size:10px;color:var(--dim);margin-top:2px">この長さを超える辺を持つ三角形を4分割</div>
+          <div style="font-size:10px;letter-spacing:2px;color:var(--dim);margin-bottom:6px;font-family:'Share Tech Mono',monospace">SUBDIVIDE</div>
+          <div class="inp-group" style="margin-bottom:4px">
+            <label>最大辺長 (mm)</label>
+            <div class="inp-row">
+              <input type="number" id="subdivMaxEdge" value="3" step="0.5" min="0.5">
+              <span class="unit">mm</span>
             </div>
-            <button id="subdivBtn" class="apply-btn" style="width:100%">▶ 細分化実行</button>
+            <div style="font-size:10px;color:var(--dim);margin-top:2px">影響半径（グリーン円）内でこの長さを超える辺を持つ三角形を4分割</div>
           </div>
+          <button id="subdivBtn" class="apply-btn" style="width:100%;margin-bottom:6px">▶ 細分化実行</button>
+        </div>
+        <div style="border-top:1px solid var(--border);margin-top:2px;padding-top:6px">
+          <div style="font-size:10px;letter-spacing:2px;color:var(--dim);margin-bottom:6px;font-family:'Share Tech Mono',monospace">DEFORM</div>
+          <div style="display:flex;gap:6px">
+            <button id="archApplyBtn" class="apply-btn" style="flex:1">▶ アーチ変形</button>
+            <button id="archUndoBtn"  class="reset-btn" style="display:none;flex:1">↩ 戻す</button>
+          </div>
+          <div style="font-size:10px;color:var(--dim);margin-top:4px">※ クリックのたびに目標半径へ段階的に近づきます。繰り返し適用可。</div>
         </div>
       </div>
     </div>
@@ -1614,7 +1612,8 @@ document.getElementById('applyBtn').addEventListener('click',()=>{
 // ── Polygon Subdivision by Edge Length ──────────────────────────
 // 非インデックス BufferGeometry（三角形スープ）を受け取り、
 // maxEdge を超える辺を持つ三角形を4分割する。maxIter 回繰り返す。
-function subdivideGeoByEdge(geo, maxEdge, maxIter) {
+// zoneFn(cx, cy, cz) が指定された場合、重心がゾーン内の三角形のみ細分化対象とする。
+function subdivideGeoByEdge(geo, maxEdge, maxIter, zoneFn) {
   let pos = Array.from(geo.attributes.position.array);
 
   for (let iter = 0; iter < maxIter; iter++) {
@@ -1630,7 +1629,10 @@ function subdivideGeoByEdge(geo, maxEdge, maxIter) {
       const lenBC = Math.sqrt((cx-bx)**2 + (cy-by)**2 + (cz-bz)**2);
       const lenCA = Math.sqrt((ax-cx)**2 + (ay-cy)**2 + (az-cz)**2);
 
-      if (lenAB > maxEdge || lenBC > maxEdge || lenCA > maxEdge) {
+      // ゾーンフィルタ: 重心が対象ゾーン外の三角形はそのまま通過
+      const inZone = !zoneFn || zoneFn((ax+bx+cx)/3, (ay+by+cy)/3, (az+bz+cz)/3);
+
+      if (inZone && (lenAB > maxEdge || lenBC > maxEdge || lenCA > maxEdge)) {
         const mabx = (ax+bx)/2, maby = (ay+by)/2, mabz = (az+bz)/2;
         const mbcx = (bx+cx)/2, mbcy = (by+cy)/2, mbcz = (bz+cz)/2;
         const mcax = (cx+ax)/2, mcay = (cy+ay)/2, mcaz = (cz+az)/2;
@@ -1659,14 +1661,26 @@ function subdivideGeoByEdge(geo, maxEdge, maxIter) {
 function applySubdivide() {
   const baseGeo = scaledGeo || currentGeo;
   if (!baseGeo) { setMsg('スケール適用後に実行してください'); return; }
+  if (!wheels.front || !wheels.rear) { setMsg('先にホイール軸を指定してください'); return; }
 
   const maxEdge = parseFloat(document.getElementById('subdivMaxEdge').value) || 3;
   if (maxEdge <= 0) { setMsg('最大辺長に正の値を入力してください'); return; }
 
+  // グリーン円（影響半径）内のみ細分化するゾーン判定関数
+  const influence = parseFloat(document.getElementById('archInfluence').value) || 20;
+  const sc = appliedScales || { sx: 1, sy: 1, sz: 1 };
+  const centers = [
+    { wx: wheels.front.x * sc.sx, wy: wheels.front.y * sc.sy },
+    { wx: wheels.rear.x  * sc.sx, wy: wheels.rear.y  * sc.sy },
+  ];
+  const zoneFn = (x, y) => centers.some(({ wx, wy }) =>
+    (x - wx) ** 2 + (y - wy) ** 2 < influence * influence
+  );
+
   setMsg('⏳ 細分化中...');
   setTimeout(() => {
     const prevCount = baseGeo.attributes.position.count / 3;
-    const newGeo = subdivideGeoByEdge(baseGeo, maxEdge, 6);
+    const newGeo = subdivideGeoByEdge(baseGeo, maxEdge, 6, zoneFn);
     const newCount = newGeo.attributes.position.count / 3;
 
     scaledGeo = newGeo;
@@ -3214,9 +3228,6 @@ document.getElementById('archApplyBtn').addEventListener('click', applyArchDefor
 document.getElementById('archUndoBtn').addEventListener('click',  resetArchDeform);
 document.getElementById('archInfluence').addEventListener('input',    () => buildArchDeformViz());
 document.getElementById('archTargetRadius').addEventListener('input', () => buildArchDeformViz());
-document.getElementById('subdivEnabled').addEventListener('change', function() {
-  document.getElementById('subdivOptions').style.display = this.checked ? 'block' : 'none';
-});
 document.getElementById('subdivBtn').addEventListener('click', applySubdivide);
 document.getElementById('shellThk').addEventListener('input',      () => buildTireCylinders());
 
