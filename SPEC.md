@@ -162,73 +162,63 @@ Z 軸（車幅方向）でモデルを左右対称化する機能。向き調整
 | ホイールアーチ局所変形（オプション） | `archDeformEnabled` | チェック時のみ操作UIと可視化円（グリーン・黄色）を表示 |
 | 影響半径 | `archInfluence` | ホイール中心から何 mm 以内の頂点を変形するか（デフォルト 20mm）。**グリーン円**で可視化 |
 | 目標アーチ半径 | `archTargetRadius` | 変形後にアーチがホイール中心から何 mm の位置になるかの目標値（デフォルト 15mm）。**黄色円**で可視化 |
-| 変形モード | `archModeCircle` / `archModeRect` | ラジオボタン。**円形**（デフォルト）または**矩形**を選択 |
-| 縮小方向にも変形する | `archShrinkEnabled` | 円形・矩形共通。OFF（デフォルト）: push-only（拡大）。ON: pull-only（縮小） |
-| 左右方向 (X) | `archRectAxisX` | 矩形モード時。チェックで X 軸方向の収束を有効化 |
-| RX | `archRectRx` | 矩形モード時。ホイール中心から左右 ±RX mm の位置を目標境界とする |
-| 上下方向 (Y) | `archRectAxisY` | 矩形モード時。チェックで Y 軸方向の収束を有効化 |
-| RY | `archRectRy` | 矩形モード時。ホイール中心 Y から ±RY mm の位置を目標境界とする（RX と同様に対称） |
+| 影響範囲の形状 | `archInfShapeCircle` / `archInfShapeRect` | ラジオボタン（name="archInfShape"）。**円形**（デフォルト）または**矩形**を選択。グリーンの可視化形状に反映 |
+| 目標形状 | `archTgtShapeCircle` / `archTgtShapeRect` | ラジオボタン（name="archTgtShape"）。**円形**（デフォルト）または**矩形**を選択。黄色の可視化形状に反映 |
+| 縮小方向にも変形する | `archShrinkEnabled` | 全モード共通。OFF（デフォルト）: push-only（拡大）。ON: pull-only（縮小） |
+| 左右方向 (X) | `archRectAxisX` | 目標形状が矩形の時のみ表示。チェックで X 軸方向の収束を有効化 |
+| RX | `archRectRx` | 目標形状が矩形の時のみ表示。ホイール中心から左右 ±RX mm の位置を目標境界とする |
+| 上下方向 (Y) | `archRectAxisY` | 目標形状が矩形の時のみ表示。チェックで Y 軸方向の収束を有効化 |
+| RY | `archRectRy` | 目標形状が矩形の時のみ表示。ホイール中心 Y から ±RY mm の位置を目標境界とする（RX と同様に対称） |
 | 最大辺長 | `subdivMaxEdge` | SUBDIVIDE セクション。影響半径（グリーン円）内でこの長さ (mm) を超える辺を持つ三角形を 4 分割（デフォルト 3mm）。`subdivBtn` で実行 |
 | ▶ 細分化実行 | `subdivBtn` | アーチ変形前の下ごしらえとして実行。グリーン円内のみ細分化するため全体ポリゴン数の増加を抑制。T字接合対策済み（後述） |
 | ▶ アーチ変形 | `archApplyBtn` | DEFORM セクション。変形を累積適用。クリックごとに目標半径へ段階的に近づく |
 | ↩ 戻す | `archUndoBtn` | 最初の適用前の `scaledGeo` に戻す（1段階 undo） |
 
-**アルゴリズム（円形モード）**
+影響範囲の形状（`archInfShape`）と目標形状（`archTgtShape`）は独立して選択できる。組み合わせは 4 通り。
 
-各頂点について、前輪・後輪それぞれのホイール中心からの XY 平面距離 `d` を計算する。
-より大きな weight を持つホイールを選択し、半径方向（Z 不変）に移動する。
-
-```
-weight  = max(0, (1 - d / influence))²                       ← 二乗 falloff（境界が滑らか）
-
-[shrinkEnabled OFF — 拡大モード]
-delta   = max(0, targetRadius - d)   ← push-only: d < targetRadius の頂点のみ外へ押し出し
-
-[shrinkEnabled ON — 縮小モード]
-delta   = min(0, targetRadius - d)   ← pull-only: d > targetRadius の頂点のみ内へ引き込み
-
-new_d   = d + delta × weight
-vertex.x = wx + (dx/d) × new_d
-vertex.y = wy + (dy/d) × new_d
-vertex.z 変化なし
-```
-
-- **拡大モード（デフォルト）**: `d < targetRadius` の頂点のみ外側へ押し出し。外側は不変
-- **縮小モード（オプション）**: `d > targetRadius` の頂点のみ内側へ引き込み（溝・アーチ外縁を縮小）。内側は不変
-- `d = targetRadius` 付近は weight × delta が 0 に近づくため滑らかに変化
-- `d ≥ influence` の頂点は変化なし（影響範囲外）
-- スケール適用済みの場合、ホイール座標を `wheels.x × sx`、`wheels.y × sy` で変換してから使用
-
-**アルゴリズム（矩形モード）**
-
-X・Y 軸を独立して処理する。チェックした軸のみ補正を適用（両方・片方どちらも可）。
-
-影響範囲・ビジュアルともに矩形（±influence の正方形）に変わる。
+**影響範囲の weight 計算**
 
 ```
-// 矩形影響範囲: 両軸ともに influence 内の頂点のみが対象
+[円形影響範囲 — archInfShapeCircle]
+d = sqrt(dx² + dy²)
+if d < influence:
+  weight = max(0, 1 - d / influence)²
+
+[矩形影響範囲 — archInfShapeRect]
 if |dx| < influence && |dy| < influence:
   tx = 1 - |dx| / influence
   ty = 1 - |dy| / influence
-  t  = min(tx, ty)          ← 両軸の「遠い方」で制限（コーナーが滑らか）
-  weight = max(0, t)²
+  weight = max(0, min(tx, ty))²
+```
 
+**目標への変形計算**
+
+```
+[円形目標 — archTgtShapeCircle]
+d = sqrt(dx² + dy²)
+[shrinkEnabled OFF] delta = max(0, targetRadius - d)   ← push-only
+[shrinkEnabled ON]  delta = min(0, targetRadius - d)   ← pull-only
+new_d    = d + delta × weight
+vertex.x = wx + (dx/d) × new_d
+vertex.y = wy + (dy/d) × new_d
+
+[矩形目標 — archTgtShapeRect]  ← X・Y 軸を独立して処理
 [左右方向 X — archRectAxisX]
-  [shrinkEnabled ON  — 縮小] |dx| > rx の頂点を ±rx へ引き込む
-    deltaX = (dx>0 ? rx : -rx) - dx   (|dx|>rx のとき、それ以外は 0)
-  [shrinkEnabled OFF — 拡大] |dx| < rx の頂点を ±rx へ押し出す
-    deltaX = (dx>0 ? rx : -rx) - dx   (0 < |dx| < rx のとき、それ以外は 0)
+  [shrinkEnabled ON  — 縮小] |dx| > rx → deltaX = (dx>0 ? rx : -rx) - dx
+  [shrinkEnabled OFF — 拡大] |dx| < rx → deltaX = (dx>0 ? rx : -rx) - dx
   vertex.x += deltaX × weight
 
-[上下方向 Y — archRectAxisY]  ← X 軸と同様に ±ry の対称形
-  [shrinkEnabled ON  — 縮小] |dy| > ry の頂点を ±ry へ引き込む
-    deltaY = (dy>0 ? ry : -ry) - dy   (|dy|>ry のとき、それ以外は 0)
-  [shrinkEnabled OFF — 拡大] |dy| < ry の頂点を ±ry へ押し出す
-    deltaY = (dy>0 ? ry : -ry) - dy   (0 < |dy| < ry のとき、それ以外は 0)
+[上下方向 Y — archRectAxisY]
+  [shrinkEnabled ON  — 縮小] |dy| > ry → deltaY = (dy>0 ? ry : -ry) - dy
+  [shrinkEnabled OFF — 拡大] |dy| < ry → deltaY = (dy>0 ? ry : -ry) - dy
   vertex.y += deltaY × weight
 
-vertex.z 変化なし
+vertex.z 変化なし（全モード共通）
 ```
+
+- 影響範囲外（weight=0）の頂点は変化なし
+- `d = targetRadius`（円形目標）または `|dx|=rx` / `|dy|=ry`（矩形目標）付近は weight × delta → 0 で滑らか
+- スケール適用済みの場合、ホイール座標を `wheels.x × sx`、`wheels.y × sy` で変換してから使用
 - 変形結果は `scaledGeo` を差し替えて保存（`shellGeo` は無効化）
 - `preArchDeformGeo` に変形前の `scaledGeo` をバックアップ（最初の適用時のみ保存）
 
@@ -255,15 +245,16 @@ Phase 2: 全三角形を処理
 
 **可視化（`buildArchDeformViz`）**
 
-スケール適用後に `archDeformBlock` が表示されている間、各ホイール中心に２種類の円筒を描画する。
+スケール適用後に `archDeformBlock` が表示されている間、各ホイール中心に２種類の形状を描画する。
 
-| 色 | 意味 | 半径 |
+| 色 | 意味 | 形状 |
 |----|------|------|
-| グリーン | 影響範囲（ここまでの頂点が変形対象） | `archInfluence` |
-| 黄色 | 目標アーチ半径（変形後の到達目標） | `archTargetRadius` |
+| グリーン | 影響範囲（ここまでの頂点が変形対象） | `archInfShapeCircle` → 円筒（半径 `archInfluence`）/ `archInfShapeRect` → 矩形ボックス（辺長 `archInfluence×2`） |
+| 黄色 | 目標形状（変形後の到達目標） | `archTgtShapeCircle` → 円筒（半径 `archTargetRadius`）/ `archTgtShapeRect` → 矩形ワイヤーフレーム（±RX・±RY のボックス輪郭） |
 
 - 入力値変更でリアルタイム更新
 - `removeArchDeformViz()` でシーンからクリア（`rebuildMesh` 時など）
+- 黄色矩形ワイヤーフレームは U字フレーム（底辺 + 両側辺）+ X方向辺 + Y方向辺を LineSegments で構成
 
 ### 06 / Export
 - ゴースト表示チェック: スケール適用後に元モデルを opacity 0.18 の半透明で表示/非表示
