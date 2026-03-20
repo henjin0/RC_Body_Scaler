@@ -785,31 +785,68 @@ function buildArchDeformViz() {
     const dispX = wx * sc.sx;
     const dispY = wy * sc.sy;
 
-    // ── 影響範囲シリンダー（グリーン、両モード共通）──
-    const cylInf = new THREE.Mesh(
-      new THREE.CylinderGeometry(influence, influence, zHalf * 2, SEG, 1, true),
-      sMatInf.clone()
-    );
-    cylInf.rotation.x = Math.PI / 2;
-    cylInf.position.set(dispX, dispY, 0);
-    cylInf.renderOrder = 490;
-    scene.add(cylInf);
-    archDeformVizMeshes.push(cylInf);
+    // ── 影響範囲（グリーン）——モード別に円 or 矩形 ──
+    if (isRect) {
+      // 矩形: ±influence の正方形ボックス
+      const infBoxMesh = new THREE.Mesh(
+        new THREE.BoxGeometry(influence * 2, influence * 2, zHalf * 2),
+        sMatInf.clone()
+      );
+      infBoxMesh.position.set(dispX, dispY, 0);
+      infBoxMesh.renderOrder = 490;
+      scene.add(infBoxMesh);
+      archDeformVizMeshes.push(infBoxMesh);
 
-    for (const z of [-zHalf, zHalf]) {
-      const pts = [];
-      for (let i = 0; i <= SEG; i++) {
-        const a = (i / SEG) * Math.PI * 2;
-        pts.push(new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, z));
+      // 前後端の矩形アウトライン
+      for (const z of [-zHalf, zHalf]) {
+        const pts = [
+          new THREE.Vector3(dispX - influence, dispY - influence, z),
+          new THREE.Vector3(dispX + influence, dispY - influence, z),
+          new THREE.Vector3(dispX + influence, dispY + influence, z),
+          new THREE.Vector3(dispX - influence, dispY + influence, z),
+          new THREE.Vector3(dispX - influence, dispY - influence, z),
+        ];
+        const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatInf);
+        ln.renderOrder = 491;
+        scene.add(ln);
+        archDeformVizMeshes.push(ln);
       }
-      const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatInf);
-      ln.renderOrder = 491;
-      scene.add(ln);
-      archDeformVizMeshes.push(ln);
-    }
-    for (let i = 0; i < 4; i++) {
-      const a = (i / 4) * Math.PI * 2;
-      addZLine(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, lMatInf, 491);
+      // 4コーナーの縦線
+      for (const [cx, cy] of [
+        [dispX - influence, dispY - influence],
+        [dispX + influence, dispY - influence],
+        [dispX + influence, dispY + influence],
+        [dispX - influence, dispY + influence],
+      ]) {
+        addZLine(cx, cy, lMatInf, 491);
+      }
+    } else {
+      // 円形: 円筒シリンダー
+      const cylInf = new THREE.Mesh(
+        new THREE.CylinderGeometry(influence, influence, zHalf * 2, SEG, 1, true),
+        sMatInf.clone()
+      );
+      cylInf.rotation.x = Math.PI / 2;
+      cylInf.position.set(dispX, dispY, 0);
+      cylInf.renderOrder = 490;
+      scene.add(cylInf);
+      archDeformVizMeshes.push(cylInf);
+
+      for (const z of [-zHalf, zHalf]) {
+        const pts = [];
+        for (let i = 0; i <= SEG; i++) {
+          const a = (i / SEG) * Math.PI * 2;
+          pts.push(new THREE.Vector3(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, z));
+        }
+        const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatInf);
+        ln.renderOrder = 491;
+        scene.add(ln);
+        archDeformVizMeshes.push(ln);
+      }
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2;
+        addZLine(dispX + Math.cos(a) * influence, dispY + Math.sin(a) * influence, lMatInf, 491);
+      }
     }
 
     if (isRect) {
@@ -819,71 +856,81 @@ function buildArchDeformViz() {
       const rx  = parseFloat(document.getElementById('archRectRx').value) || 15;
       const ry  = parseFloat(document.getElementById('archRectRy').value) || 20;
 
-      // 有効な軸に応じてプロファイル点を生成（U字形: 左→頂部→右、底は開口）
+      // RX・RY ともにホイール中心から ± の対称形で描画
+      // axX のみ: ±rx の縦2面、axY のみ: ±ry の横2面、両方: 閉じた矩形
       const makeProfile = (z) => {
         if (axX && axY) {
+          // 閉じた矩形（±rx, ±ry、ホイール中心が中央）
           return [
-            new THREE.Vector3(dispX - rx, dispY,      z),
+            new THREE.Vector3(dispX - rx, dispY - ry, z),
             new THREE.Vector3(dispX - rx, dispY + ry, z),
             new THREE.Vector3(dispX + rx, dispY + ry, z),
-            new THREE.Vector3(dispX + rx, dispY,      z),
+            new THREE.Vector3(dispX + rx, dispY - ry, z),
+            new THREE.Vector3(dispX - rx, dispY - ry, z), // 閉じる
           ];
         } else if (axX) {
-          // 左右のみ: 2本の縦線（上下は influence 範囲で表現）
-          return null;
+          return null; // 左右のみは別処理
         } else if (axY) {
-          // 上下のみ: 天井1本の横線（左右は influence 範囲で表現）
-          return [
-            new THREE.Vector3(dispX - influence, dispY + ry, z),
-            new THREE.Vector3(dispX + influence, dispY + ry, z),
-          ];
+          // 上下のみ: ±ry に横2本の線
+          return null; // 別処理
         }
         return null;
       };
 
       if (axX && !axY) {
-        // 左右のみ: ±rx に縦線パネルを描く
+        // 左右のみ: ±rx に縦線パネル（Y幅は influence で表現）
         for (const x of [dispX - rx, dispX + rx]) {
           for (const z of [-zHalf, zHalf]) {
             const pts = [
-              new THREE.Vector3(x, dispY - influence * 0.5, z),
-              new THREE.Vector3(x, dispY + influence,       z),
+              new THREE.Vector3(x, dispY - influence, z),
+              new THREE.Vector3(x, dispY + influence, z),
             ];
             const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt.clone());
             ln.renderOrder = 493;
             scene.add(ln);
             archDeformVizMeshes.push(ln);
           }
-          addZLine(x, dispY - influence * 0.5, lMatTgt.clone(), 493);
-          addZLine(x, dispY + influence,        lMatTgt.clone(), 493);
+          addZLine(x, dispY - influence, lMatTgt.clone(), 493);
+          addZLine(x, dispY + influence, lMatTgt.clone(), 493);
         }
-      } else {
-        // Y軸あり（axY単独 または axX+axY）: プロファイルを前後端に描画
+      } else if (!axX && axY) {
+        // 上下のみ: ±ry に横線パネル（X幅は influence で表現）
+        for (const y of [dispY - ry, dispY + ry]) {
+          for (const z of [-zHalf, zHalf]) {
+            const pts = [
+              new THREE.Vector3(dispX - influence, y, z),
+              new THREE.Vector3(dispX + influence, y, z),
+            ];
+            const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt.clone());
+            ln.renderOrder = 493;
+            scene.add(ln);
+            archDeformVizMeshes.push(ln);
+          }
+          addZLine(dispX - influence, y, lMatTgt.clone(), 493);
+          addZLine(dispX + influence, y, lMatTgt.clone(), 493);
+        }
+      } else if (axX && axY) {
+        // 両方: 閉じた矩形を前後端に描画 + コーナー縦線 + 半透明ボックス
         for (const z of [-zHalf, zHalf]) {
           const pts = makeProfile(z);
-          if (pts && pts.length >= 2) {
+          if (pts) {
             const ln = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), lMatTgt.clone());
             ln.renderOrder = 493;
             scene.add(ln);
             archDeformVizMeshes.push(ln);
           }
         }
-        // 前後端を結ぶ縦線（コーナー）
-        const profile = makeProfile(0);
-        if (profile) {
-          for (const pt of profile) {
-            addZLine(pt.x, pt.y, lMatTgt.clone(), 493);
-          }
+        for (const [cx, cy] of [
+          [dispX - rx, dispY - ry], [dispX - rx, dispY + ry],
+          [dispX + rx, dispY + ry], [dispX + rx, dispY - ry],
+        ]) {
+          addZLine(cx, cy, lMatTgt.clone(), 493);
         }
-      }
-
-      // 半透明ボックス（axX && axY 時のみ）
-      if (axX && axY) {
         const boxMesh = new THREE.Mesh(
-          new THREE.BoxGeometry(rx * 2, ry, zHalf * 2),
+          new THREE.BoxGeometry(rx * 2, ry * 2, zHalf * 2),
           sMatTgt.clone()
         );
-        boxMesh.position.set(dispX, dispY + ry / 2, 0);
+        boxMesh.position.set(dispX, dispY, 0); // ホイール中心が中央
         boxMesh.renderOrder = 492;
         scene.add(boxMesh);
         archDeformVizMeshes.push(boxMesh);
@@ -1927,9 +1974,10 @@ function applyArchDeform() {
       let bestWeight = 0, bestWx = 0, bestWy = 0;
       for (const { wx, wy } of wheelCenters) {
         const dx = pos[i] - wx, dy = pos[i+1] - wy;
-        const d = Math.sqrt(dx*dx + dy*dy);
-        if (d < influence) {
-          const t = 1 - d / influence;
+        const absDx = Math.abs(dx), absDy = Math.abs(dy);
+        if (absDx < influence && absDy < influence) {
+          // 矩形影響範囲: 両軸の「遠い方」でウェイトを決定
+          const t = Math.min(1 - absDx / influence, 1 - absDy / influence);
           const w = t * t;
           if (w > bestWeight) { bestWeight = w; bestWx = wx; bestWy = wy; }
         }
@@ -1952,13 +2000,15 @@ function applyArchDeform() {
         }
 
         if (rectAxisY) {
+          // Y軸も X軸と同様に ±ry の対称形で処理（ホイール中心が中央）
+          const absDy = Math.abs(dy);
           let deltaY = 0;
           if (shrinkEnabled) {
-            // pull-only: ry より上の頂点を ry へ引き込む（アーチを低くする）
-            if (dy > ry) deltaY = ry - dy;
+            // pull-only: |dy| > ry の頂点を ±ry へ引き込む
+            if (absDy > ry) deltaY = (dy > 0 ? ry : -ry) - dy;
           } else {
-            // push-only: 0〜ry の間にある頂点を ry へ押し出す（アーチを高くする）
-            if (dy > 0 && dy < ry) deltaY = ry - dy;
+            // push-only: |dy| < ry の頂点を ±ry へ押し出す
+            if (absDy < ry && absDy > 0.001) deltaY = (dy > 0 ? ry : -ry) - dy;
           }
           pos[i+1] += deltaY * bestWeight;
         }
